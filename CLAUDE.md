@@ -20,9 +20,11 @@ npm run check      # lint + typecheck, same as CI
 npm run typecheck  # tsc -b --noEmit
 npm run lint       # oxlint
 npm run build      # typecheck, then production build
+npm run test:print # print regression check (builds, serves, prints to PDF)
 ```
 
-There is no test suite. Verification is done by driving the app in Chromium (see below).
+The only tests are the print checks in `tests/`; there are no unit tests. `npm run test:print`
+builds and serves the app itself, so it needs no running dev server.
 
 ## Two non-negotiable technical choices
 
@@ -64,14 +66,32 @@ Re-check both after upgrading OSMD.
 
 ## Verifying print output
 
-There is no automated check for "does it print correctly", so verify in a real browser: build,
-`npx vite preview`, then drive it with Playwright against `public/samples/` (Chromium is
-preinstalled at `/opt/pw-browsers/chromium`; do not run `playwright install`). Generate a PDF with
-`page.pdf({ preferCSSPageSize: true })` and assert the page count and the ~210×297mm media box.
+`npm run test:print` (`tests/print.spec.ts`, Playwright) is the automated half: it builds, serves,
+opens each file in `public/samples/`, prints to PDF with `page.pdf({ preferCSSPageSize: true })`,
+and asserts the page count and the ~210×297mm media box. CI runs it as a separate `print` job.
 
-One trap: `page.emulateMedia()` outlives navigation. Leaving it set to `'screen'` makes a later
-`page.pdf()` render with screen styles and report wrong page counts — that looks exactly like a
-pagination bug in the app.
+Chromium is preinstalled at `/opt/pw-browsers/chromium`; **do not run `playwright install`** here.
+`@playwright/test` is pinned to an exact version rather than a caret range so the browser build it
+expects is the one already on disk.
+
+What the suite deliberately checks, and why each assertion exists — all three were verified by
+breaking the code and watching the right test fail:
+
+- **PDF page count and media box** — catches OSMD's per-page wrapper shrinking to fit, which
+  repaginates the document (2 pages became 4).
+- **`score-page--break-after` on every page but the last, asserted on the DOM** — the page-count
+  assertion *cannot* see this one. Each sample is exactly two 297mm pages, so cancelling the break
+  still flows to 2 sheets; the class assignment has to be checked structurally.
+- **Page width on screen, not just in print** — the 300px collapse is a screen-side bug. In print
+  `.score-page` has a fixed `210mm`, so a print-only measurement passes even while the screen
+  layout is broken.
+
+Two traps:
+
+- `page.emulateMedia()` outlives navigation. Leaving it set to `'screen'` makes a later
+  `page.pdf()` render with screen styles and report wrong page counts — that looks exactly like a
+  pagination bug in the app.
+- A print assertion is not automatically a screen assertion (see the third bullet above).
 
 Measured results (OSMD 2.1.2, Chromium 1194) — option names, print scale, TAB support, and
 multi-page signature behavior — are recorded in README.md. Update that section when findings change.

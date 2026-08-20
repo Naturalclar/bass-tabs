@@ -28,3 +28,26 @@ jobs:
       - run: npm run typecheck
       # `npm run build` would re-run typecheck; the step above already did it.
       - run: npx vite build
+
+  # Printing is what this app is for, and neither oxlint nor tsc can see it:
+  # the page count comes from OSMD's pagination and the paper size from CSS the
+  # printer resolves. This job builds, serves, and prints to PDF for real.
+  print:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # @playwright/test is pinned exactly so this build matches the browser the
+      # suite was measured against.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:print
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
