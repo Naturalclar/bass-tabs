@@ -4,8 +4,10 @@ import { test, expect, type Page } from '@playwright/test'
  * Guards the print contract: open a MusicXML file, then assert that what comes
  * out of the printer is A4 and paginated by OSMD.
  *
- * Both bugs recorded in README (実装上つまずいた点) are print-only and invisible
- * on screen, which is what makes them worth a browser-driven check.
+ * Both bugs recorded in README (実装上つまずいた点) come from OSMD's per-page
+ * wrapper divs, and neither is visible to oxlint or tsc -- one only shows up in
+ * the printed PDF, the other only in the on-screen layout. So the checks below
+ * deliberately measure both media, not just print.
  */
 
 const MM_PER_PT = 25.4 / 72
