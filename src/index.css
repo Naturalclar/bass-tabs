@@ -1,0 +1,170 @@
+:root {
+  --page-width: 210mm;
+  --ui-bg: #1f2124;
+  --ui-fg: #f2f2f2;
+  --workspace-bg: #55585c;
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--workspace-bg);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* ---------- toolbar ---------- */
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0.75rem 1rem;
+  background: var(--ui-bg);
+  color: var(--ui-fg);
+}
+
+.toolbar__title {
+  margin: 0 0.5rem 0 0;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.toolbar__status {
+  margin: 0;
+  flex: 1 1 16rem;
+  min-width: 0;
+  font-size: 0.85rem;
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+}
+
+.toolbar__status--error {
+  color: #ff9a8c;
+  opacity: 1;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid #6b6f75;
+  border-radius: 4px;
+  background: #303338;
+  color: inherit;
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: #3c4046;
+}
+
+.button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---------- score ---------- */
+
+.sheet {
+  padding: 1.5rem 1rem 3rem;
+}
+
+.sheet__placeholder {
+  max-width: var(--page-width);
+  margin: 3rem auto;
+  padding: 2rem;
+  border: 1px dashed #8b9096;
+  border-radius: 6px;
+  color: #e6e6e6;
+  text-align: center;
+}
+
+.sheet__pages {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/*
+ * OSMD's own per-page wrapper. It must stay full width: if it shrink-to-fits
+ * (e.g. under align-items: center) the page svg has no intrinsic size to fit
+ * to, collapses to the 300px replaced-element default, and the percentage in
+ * .score-page's width resolves against that.
+ */
+.score-page-wrapper {
+  width: 100%;
+}
+
+/* One <svg> per page, sized by its viewBox (see makePagesScalable). */
+.score-page {
+  display: block;
+  width: min(100%, var(--page-width));
+  height: auto;
+  margin-inline: auto;
+  background: #fff;
+  box-shadow: 0 2px 12px rgb(0 0 0 / 45%);
+}
+
+/* ---------- print ---------- */
+
+/*
+ * OSMD already broke the score into A4 pages, so the paper only has to agree
+ * with it: same size, no browser margin on top of OSMD's own page margins.
+ */
+@page {
+  size: A4 portrait;
+  margin: 0;
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+
+  .toolbar,
+  .sheet__placeholder {
+    display: none !important;
+  }
+
+  .sheet {
+    padding: 0;
+  }
+
+  .sheet__pages {
+    display: block;
+    gap: 0;
+  }
+
+  .score-page {
+    width: 210mm;
+    height: 297mm;
+    margin: 0;
+    box-shadow: none;
+    break-inside: avoid;
+  }
+
+  /* Set by makePagesScalable() on every page but the last. */
+  .score-page--break-after {
+    break-after: page;
+  }
+}
