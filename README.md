@@ -31,7 +31,8 @@ npm run dev        # 開発サーバ
 | `npm run preview` | ビルド結果の確認 |
 | `npm run lint` | oxlint |
 | `npm run typecheck` | `tsc -b --noEmit` |
-| `npm run check` | lint + typecheck（CI と同じ） |
+| `npm run check` | lint + typecheck |
+| `npm run test:print` | 印刷リグレッションチェック（ビルド → 配信 → PDF 出力まで実行） |
 
 ### なぜ oxlint と tsc の両方なのか
 
@@ -39,6 +40,30 @@ oxlint は速度を理由に選んでいるが、型情報を使う検査（type
 完全にはカバーしない。その層は `tsc` で埋める。**片方だけでは足りない**という実例が実際に出た:
 `backend: BackendType.SVG` は oxlint を素通りしたが `tsc` が拒否した（OSMD 2.1.2 の `backend` は
 `string` 型で、数値 enum の `BackendType` は代入できない。正しくは `backend: 'svg'`）。
+
+## 印刷リグレッションチェック
+
+```sh
+npm run test:print
+```
+
+印刷結果はこのアプリの成果物そのものだが、oxlint も `tsc` も見ることができない
+（ページ数は OSMD の改ページ、紙のサイズはプリンタが解決する CSS が決めるため）。
+そこで Playwright で実際にビルド・配信・PDF 出力まで通して検査する（`tests/print.spec.ts`）。
+サーバは設定側で起動するので、事前に `npm run dev` を動かしておく必要は無い。
+
+検査している内容と、それぞれが**どの不具合を捕まえるか**（いずれもコードを壊して
+対応するテストが落ちることを確認済み）:
+
+| 検査 | 捕まえる不具合 |
+| --- | --- |
+| PDF のページ数と `/MediaBox` (≈210×297mm) | ページラッパーの shrink-to-fit による再ページング（2 ページが 4 ページになる） |
+| `score-page--break-after` が最終ページ以外に付いているか（DOM を直接検査） | 改ページ指定の消失。**ページ数では検知できない** — 各サンプルはちょうど 297mm × 2 ページなので、改ページを消しても自然フローで 2 枚に収まってしまう |
+| 画面表示時のページ幅（印刷時だけでなく） | 300px への潰れ。これは**画面側**の不具合で、印刷時は `.score-page` が `210mm` 固定のため印刷側だけ測っても素通りする |
+
+`@playwright/test` はキャレット範囲ではなく**バージョン完全固定**にしている。
+対応する Chromium ビルドが変わると測定値の前提が変わるため。
+CI では `check`（lint / typecheck / build）とは別ジョブで走る。
 
 ## 印刷設計
 
