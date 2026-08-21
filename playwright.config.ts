@@ -23,9 +23,9 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    // vite build directly, not `npm run build`: that script re-runs typecheck,
+    // vite build directly, not `pnpm build`: that script re-runs typecheck,
     // which CI already ran as its own step.
-    command: `npx vite build && npx vite preview --port ${PORT} --strictPort`,
+    command: `pnpm exec vite build && pnpm exec vite preview --port ${PORT} --strictPort`,
     // Wait on the app's own path: the origin root only 302s here, so it would
     // report ready without the app having been served at all.
     url: `${ORIGIN}${BASE_PATH}`,

@@ -22,16 +22,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      # Before setup-node: its `cache: pnpm` asks pnpm where the store lives, so
+      # pnpm has to be on PATH by then. The version comes from packageManager.
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
       - uses: actions/configure-pages@v5
-      - run: npm ci
-      # `npm run build` runs typecheck first, so a type error stops the deploy.
+      - run: pnpm install --frozen-lockfile
+      # `pnpm build` runs typecheck first, so a type error stops the deploy.
       # lint and the print check live in CI and do not gate it -- see the note
       # in README.
-      - run: npm run build
+      - run: pnpm build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

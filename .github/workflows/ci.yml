@@ -18,16 +18,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      # Before setup-node: its `cache: pnpm` asks pnpm where the store lives, so
+      # pnpm has to be on PATH by then. The version comes from packageManager.
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run lint
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
       # oxlint does not cover type-informed checks; tsc fills that layer.
-      - run: npm run typecheck
-      # `npm run build` would re-run typecheck; the step above already did it.
-      - run: npx vite build
+      - run: pnpm typecheck
+      # `pnpm build` would re-run typecheck; the step above already did it.
+      - run: pnpm exec vite build
 
   # Printing is what this app is for, and neither oxlint nor tsc can see it:
   # the page count comes from OSMD's pagination and the paper size from CSS the
@@ -36,15 +39,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      # Before setup-node: its `cache: pnpm` asks pnpm where the store lives, so
+      # pnpm has to be on PATH by then. The version comes from packageManager.
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       # @playwright/test is pinned exactly so this build matches the browser the
       # suite was measured against.
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:print
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:print
       - if: failure()
         uses: actions/upload-artifact@v5
         with:

@@ -15,15 +15,15 @@ building it.
 ## Commands
 
 ```sh
-npm run dev        # dev server
-npm run check      # lint + typecheck, same as CI
-npm run typecheck  # tsc -b --noEmit
-npm run lint       # oxlint
-npm run build      # typecheck, then production build
-npm run test:print # print regression check (builds, serves, prints to PDF)
+pnpm dev        # dev server
+pnpm check      # lint + typecheck, same as CI
+pnpm typecheck  # tsc -b --noEmit
+pnpm lint       # oxlint
+pnpm build      # typecheck, then production build
+pnpm test:print # print regression check (builds, serves, prints to PDF)
 ```
 
-The only tests are the print checks in `tests/`; there are no unit tests. `npm run test:print`
+The only tests are the print checks in `tests/`; there are no unit tests. `pnpm test:print`
 builds and serves the app itself, so it needs no running dev server.
 
 ## Two non-negotiable technical choices
@@ -31,7 +31,7 @@ builds and serves the app itself, so it needs no running dev server.
 Both were decided deliberately; don't "simplify" them away.
 
 - **oxlint, not ESLint** — chosen for speed. It does not fully cover type-informed rules, so
-  `tsc -b --noEmit` is a separate mandatory step, in `npm run build`, `npm run check`, and CI.
+  `tsc -b --noEmit` is a separate mandatory step, in `pnpm build`, `pnpm check`, and CI.
   Neither layer alone is sufficient; this has already caught a real error oxlint let through.
 - **SVG backend, never Canvas** — Canvas is raster, so it prints with soft note edges. The
   `backend: 'svg'` option in `src/score/osmdOptions.ts` is a print-quality requirement.
@@ -76,7 +76,7 @@ Re-check both after upgrading OSMD.
 
 ## Verifying print output
 
-`npm run test:print` (`tests/print.spec.ts`, Playwright) is the automated half: it builds, serves,
+`pnpm test:print` (`tests/print.spec.ts`, Playwright) is the automated half: it builds, serves,
 opens each file in `public/samples/`, prints to PDF with `page.pdf({ preferCSSPageSize: true })`,
 and asserts the page count and the ~210×297mm media box. CI runs it as a separate `print` job.
 
