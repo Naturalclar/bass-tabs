@@ -7,6 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A MusicXML viewer whose only job is **producing printable A4 sheet music** for bass practice.
 Vite + React + TypeScript, rendering via OpenSheetMusicDisplay (OSMD).
 
+It also has a tab editor, so a score can be written in the app instead of imported — but only as a
+way to get something onto paper.
+
 Explicitly out of scope: playback, cursor following, tempo control, section looping. Anything
 "follow along on screen while playing" belongs to a separate alphaTab experiment, not here. A
 feature request phrased as "it would be nice while practicing" is usually this, so check before
@@ -23,7 +26,8 @@ pnpm build      # typecheck, then production build
 pnpm test:print # print regression check (builds, serves, prints to PDF)
 ```
 
-The only tests are the print checks in `tests/`; there are no unit tests. `pnpm test:print`
+The only tests are the print checks in `tests/` — `print.spec.ts` for imported files and
+`editor.spec.ts` for scores written in the app; there are no unit tests. `pnpm test:print`
 builds and serves the app itself, so it needs no running dev server.
 
 ## Two non-negotiable technical choices
@@ -47,6 +51,26 @@ The whole app is three moving parts:
   codebase and its comments explain why each step exists.
 - `src/index.css` — screen layout plus the `@media print` block. Paper size is stated here once
   (`210mm × 297mm`), which only works because pages carry a `viewBox`.
+
+### The editor is a MusicXML generator, not a second renderer
+
+`src/editor/` holds an editable model (`model.ts`), the tab/pitch conversions (`tuning.ts`), and
+`musicxml.ts`, which serialises the model to MusicXML. `App.tsx` feeds that string straight into
+the same `useOsmd().loadScore()` an imported file goes through, so **the A4 layout, the print CSS,
+and the print checks all apply to edited scores for free**. Keep it that way: anything that renders
+the editor's output by another path has to re-earn all of that.
+
+Two things constrain `musicxml.ts`:
+
+- Its output shape copies `public/samples/bass-tab.musicxml` — one part, two staves, every event
+  written twice with a `<backup>` between. That file is the one the print checks already prove OSMD
+  renders; a different shape means re-verifying OSMD's layout from scratch.
+- `DIVISIONS` is 24 because that is the smallest value keeping every supported duration a whole
+  number, down to a dotted 16th (9).
+
+MusicXML's two numbering schemes run in opposite directions and are the easiest thing to break:
+`<string>` counts from the highest-pitched string (G is 1), `<staff-tuning line>` counts from the
+bottom staff line (low E is 1). `tuning.ts` holds the conversion; don't inline the arithmetic.
 
 Rendering happens at a fixed pixel width on purpose: OSMD lays out in resolution-independent
 units, so pinning the width keeps line and page breaks from moving with the window, and CSS
