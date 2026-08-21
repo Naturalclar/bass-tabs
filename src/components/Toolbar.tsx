@@ -1,8 +1,11 @@
 import { useId, type ChangeEvent } from 'react'
 import type { ScoreStatus } from '../score/useOsmd'
+import type { Mode } from '../App'
 
 type Props = {
   status: ScoreStatus
+  mode: Mode
+  onMode: (mode: Mode) => void
   onPickFile: (file: File) => void
   onPrint: () => void
 }
@@ -10,7 +13,7 @@ type Props = {
 function statusText(status: ScoreStatus): string {
   switch (status.kind) {
     case 'empty':
-      return 'MusicXML (.xml / .musicxml / .mxl) を選んでください'
+      return 'MusicXML を開くか、画面上で作ってください'
     case 'loading':
       return `${status.name} を読み込み中…`
     case 'ready':
@@ -20,7 +23,7 @@ function statusText(status: ScoreStatus): string {
   }
 }
 
-export function Toolbar({ status, onPickFile, onPrint }: Props) {
+export function Toolbar({ status, mode, onMode, onPickFile, onPrint }: Props) {
   const inputId = useId()
 
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
@@ -33,6 +36,14 @@ export function Toolbar({ status, onPickFile, onPrint }: Props) {
   return (
     <header className="toolbar">
       <h1 className="toolbar__title">bass-tabs</h1>
+      <button
+        type="button"
+        className={`button${mode === 'edit' ? ' button--on' : ''}`}
+        aria-pressed={mode === 'edit'}
+        onClick={() => onMode(mode === 'edit' ? 'open' : 'edit')}
+      >
+        譜面を作る
+      </button>
       <label className="button" htmlFor={inputId}>
         ファイルを開く
         <input

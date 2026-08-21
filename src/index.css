@@ -131,6 +131,177 @@ body {
  * OSMD already broke the score into A4 pages, so the paper only has to agree
  * with it: same size, no browser margin on top of OSMD's own page margins.
  */
+/* --- editor ------------------------------------------------------------- */
+
+.button--on {
+  background: #1f2937;
+  color: #fff;
+  border-color: #1f2937;
+}
+
+.editor-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  background: #f6f7f9;
+  border-bottom: 1px solid #d8dbe0;
+}
+
+.editor-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: #4b5563;
+}
+
+.editor-field--group {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.editor-field input,
+.editor-field select {
+  font: inherit;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #c9ced6;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.editor-field input[type='number'] {
+  width: 5rem;
+}
+
+.chip {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #c9ced6;
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.chip--on {
+  background: #1f2937;
+  color: #fff;
+  border-color: #1f2937;
+}
+
+.editor-remaining {
+  font-size: 0.8rem;
+  color: #6b7280;
+  margin-left: auto;
+}
+
+.editor-help {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #6b7280;
+}
+
+.editor-help kbd {
+  font: inherit;
+  padding: 0 0.25rem;
+  border: 1px solid #c9ced6;
+  border-radius: 3px;
+  background: #fff;
+}
+
+.tab-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  background: #fff;
+  border-bottom: 1px solid #d8dbe0;
+}
+
+.tab-editor:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+}
+
+.tab-measure {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.3rem;
+  padding-right: 0.6rem;
+  border-right: 2px solid #9ca3af;
+}
+
+.tab-measure__number {
+  font-size: 0.7rem;
+  color: #9ca3af;
+  min-width: 1.2rem;
+}
+
+.tab-measure__grid {
+  display: flex;
+  gap: 0.15rem;
+}
+
+.tab-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.15rem;
+  border-radius: 4px;
+}
+
+.tab-column--selected {
+  background: #dbeafe;
+}
+
+.tab-column__value {
+  font-size: 0.7rem;
+  color: #6b7280;
+  height: 1rem;
+}
+
+.tab-column__rest {
+  font-size: 0.65rem;
+  color: #6b7280;
+}
+
+.tab-cell {
+  font: inherit;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  width: 1.7rem;
+  height: 1.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: #9ca3af;
+  cursor: pointer;
+}
+
+.tab-cell:hover {
+  border-color: #93c5fd;
+}
+
+.tab-cell--note {
+  color: #111827;
+  font-weight: 600;
+  background: #f3f4f6;
+}
+
 @page {
   size: A4 portrait;
   margin: 0;
@@ -142,6 +313,8 @@ body {
   }
 
   .toolbar,
+  .editor-panel,
+  .tab-editor,
   .sheet__placeholder {
     display: none !important;
   }
