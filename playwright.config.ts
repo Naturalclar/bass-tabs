@@ -1,7 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
+import { BASE_PATH } from './base-path.ts'
 
 const PORT = 4173
-const BASE_URL = `http://localhost:${PORT}`
+const ORIGIN = `http://localhost:${PORT}`
 
 /**
  * Print output is the product here, and there is no way to assert on it without
@@ -17,7 +18,7 @@ export default defineConfig({
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : [['list']],
   timeout: 60_000,
   use: {
-    baseURL: BASE_URL,
+    baseURL: ORIGIN,
     trace: 'retain-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
@@ -25,7 +26,9 @@ export default defineConfig({
     // vite build directly, not `npm run build`: that script re-runs typecheck,
     // which CI already ran as its own step.
     command: `npx vite build && npx vite preview --port ${PORT} --strictPort`,
-    url: BASE_URL,
+    // Wait on the app's own path: the origin root only 302s here, so it would
+    // report ready without the app having been served at all.
+    url: `${ORIGIN}${BASE_PATH}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

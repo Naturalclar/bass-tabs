@@ -52,6 +52,16 @@ Rendering happens at a fixed pixel width on purpose: OSMD lays out in resolution
 units, so pinning the width keeps line and page breaks from moving with the window, and CSS
 handles display size afterwards.
 
+### Deployment path
+
+The site is a GitHub Pages project site, so it is served from `/bass-tabs/`, not a domain root.
+That path lives once in `base-path.ts`; Vite reads it as `base` and the print checks navigate to
+it. Don't inline the string in either place — they sit in separate tsconfig projects, so nothing
+catches it when only one is updated.
+
+`vite preview` and `vite dev` both redirect the origin root to the base path. GitHub Pages does
+not, so tests navigate to the base path rather than relying on that redirect.
+
 ### OSMD's DOM shape is load-bearing
 
 OSMD wraps every page `<svg>` in its own `<div>`. Two consequences bit us already and are
