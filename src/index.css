@@ -2,8 +2,13 @@
   --page-width: 210mm;
   --ui-bg: #1f2124;
   --ui-fg: #f2f2f2;
+  --ui-panel-bg: #26282c;
+  --ui-control-bg: #303338;
+  --ui-border: #6b6f75;
+  --ui-divider: #3c4046;
+  --ui-muted: #9aa0a6;
   --workspace-bg: #55585c;
-  color-scheme: light dark;
+  color-scheme: dark;
   font-family: system-ui, -apple-system, 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
 }
 
@@ -133,10 +138,17 @@ body {
  */
 /* --- editor ------------------------------------------------------------- */
 
+/*
+ * The editor shares the toolbar's palette rather than introducing a light one.
+ * Every control states its own `color`: with a dark `color-scheme` the UA's
+ * default control text is near-white, so a background without a colour is a
+ * white-on-white field -- which is exactly how this panel first shipped.
+ */
+
 .button--on {
-  background: #1f2937;
-  color: #fff;
-  border-color: #1f2937;
+  background: var(--ui-fg);
+  color: var(--ui-bg);
+  border-color: var(--ui-fg);
 }
 
 .editor-panel {
@@ -144,8 +156,9 @@ body {
   flex-direction: column;
   gap: 0.6rem;
   padding: 0.75rem 1rem;
-  background: #f6f7f9;
-  border-bottom: 1px solid #d8dbe0;
+  background: var(--ui-panel-bg);
+  color: var(--ui-fg);
+  border-bottom: 1px solid var(--ui-divider);
 }
 
 .editor-row {
@@ -160,7 +173,7 @@ body {
   flex-direction: column;
   gap: 0.2rem;
   font-size: 0.8rem;
-  color: #4b5563;
+  color: var(--ui-muted);
 }
 
 .editor-field--group {
@@ -173,9 +186,10 @@ body {
 .editor-field select {
   font: inherit;
   padding: 0.25rem 0.4rem;
-  border: 1px solid #c9ced6;
+  border: 1px solid var(--ui-border);
   border-radius: 4px;
-  background: #fff;
+  background: var(--ui-control-bg);
+  color: var(--ui-fg);
 }
 
 .editor-field input[type='number'] {
@@ -186,36 +200,38 @@ body {
   font: inherit;
   font-size: 0.85rem;
   padding: 0.25rem 0.6rem;
-  border: 1px solid #c9ced6;
+  border: 1px solid var(--ui-border);
   border-radius: 999px;
-  background: #fff;
+  background: var(--ui-control-bg);
+  color: var(--ui-fg);
   cursor: pointer;
 }
 
 .chip--on {
-  background: #1f2937;
-  color: #fff;
-  border-color: #1f2937;
+  background: var(--ui-fg);
+  color: var(--ui-bg);
+  border-color: var(--ui-fg);
 }
 
 .editor-remaining {
   font-size: 0.8rem;
-  color: #6b7280;
+  color: var(--ui-muted);
   margin-left: auto;
 }
 
 .editor-help {
   margin: 0;
   font-size: 0.78rem;
-  color: #6b7280;
+  color: var(--ui-muted);
 }
 
 .editor-help kbd {
   font: inherit;
   padding: 0 0.25rem;
-  border: 1px solid #c9ced6;
+  border: 1px solid var(--ui-border);
   border-radius: 3px;
-  background: #fff;
+  background: var(--ui-control-bg);
+  color: var(--ui-fg);
 }
 
 .tab-editor {
@@ -224,12 +240,13 @@ body {
   gap: 0.75rem;
   padding: 0.75rem 1rem;
   overflow-x: auto;
-  background: #fff;
-  border-bottom: 1px solid #d8dbe0;
+  background: var(--ui-bg);
+  color: var(--ui-fg);
+  border-bottom: 1px solid var(--ui-divider);
 }
 
 .tab-editor:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid #6ea8fe;
   outline-offset: -2px;
 }
 
@@ -238,12 +255,12 @@ body {
   align-items: flex-start;
   gap: 0.3rem;
   padding-right: 0.6rem;
-  border-right: 2px solid #9ca3af;
+  border-right: 2px solid var(--ui-border);
 }
 
 .tab-measure__number {
   font-size: 0.7rem;
-  color: #9ca3af;
+  color: var(--ui-muted);
   min-width: 1.2rem;
 }
 
@@ -262,18 +279,18 @@ body {
 }
 
 .tab-column--selected {
-  background: #dbeafe;
+  background: #2d4a72;
 }
 
 .tab-column__value {
   font-size: 0.7rem;
-  color: #6b7280;
+  color: var(--ui-muted);
   height: 1rem;
 }
 
 .tab-column__rest {
   font-size: 0.65rem;
-  color: #6b7280;
+  color: var(--ui-muted);
 }
 
 .tab-cell {
@@ -288,18 +305,18 @@ body {
   border: 1px solid transparent;
   border-radius: 3px;
   background: transparent;
-  color: #9ca3af;
+  color: var(--ui-muted);
   cursor: pointer;
 }
 
 .tab-cell:hover {
-  border-color: #93c5fd;
+  border-color: #6ea8fe;
 }
 
 .tab-cell--note {
-  color: #111827;
+  color: var(--ui-fg);
   font-weight: 600;
-  background: #f3f4f6;
+  background: var(--ui-divider);
 }
 
 @page {
