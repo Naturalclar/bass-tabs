@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { BASE_PATH } from '../base-path.ts'
 
 /**
  * Guards the print contract: open a MusicXML file, then assert that what comes
@@ -42,7 +43,11 @@ function pdfPageSizeMm(pdf: Buffer): { width: number; height: number } {
 }
 
 async function openSample(page: Page, file: string) {
-  await page.goto('/')
+  // Navigate to the real path rather than '/'. `vite preview` happens to
+  // redirect the origin root to the base path, but GitHub Pages serves the
+  // site only from the base path and offers no such redirect, so going
+  // through '/' would exercise a convenience of the test server instead.
+  await page.goto(BASE_PATH)
   await page.setInputFiles('input[type="file"]', `public/samples/${file}`)
   await expect(page.getByRole('status')).toContainText('ページ (A4 縦)')
 }

@@ -10,11 +10,29 @@ Vite + React + TypeScript / 描画は [OpenSheetMusicDisplay](https://opensheetm
 画面で弾きながら追う用途（再生・カーソル追従・テンポ変更・区間ループ）は**対象外**。
 このサイトは印刷物を出すためのもので、そちらの用途は alphaTab で別途検討する。
 
+## 公開先
+
+<https://naturalclar.github.io/bass-tabs/>
+
+`main` に push すると `.github/workflows/pages.yml` がビルドしてデプロイする。
+ファイルはブラウザ内でのみ処理されるので、サーバ側の処理は無く静的配信で足りる。
+
+project site なので配信パスは `/bass-tabs/`。この文字列は `base-path.ts` に 1 箇所だけ置いて、
+Vite の `base` と Playwright の遷移先の両方がそこを参照している（片方だけ直す事故を防ぐため）。
+`npm run dev` も同じパスで動く（<http://localhost:5173/bass-tabs/>）。dev と本番で
+パスの解決を変えないため、意図的にそうしている。
+
+**リポジトリ側の設定**: Settings → Pages の source を「GitHub Actions」にしておく必要がある。
+
+**デプロイは CI の成否では止まらない。** Pages と CI は別ワークフローなので `needs:` で繋げない。
+Pages 側のビルドは `npm run build`（typecheck 込み）なので型エラーとビルド失敗は止まるが、
+lint と print チェックの失敗はデプロイを止めない。困るようなら `workflow_run` で繋ぐ。
+
 ## 使い方
 
 ```sh
 npm install
-npm run dev        # 開発サーバ
+npm run dev        # 開発サーバ (http://localhost:5173/bass-tabs/)
 ```
 
 「ファイルを開く」で `.xml` / `.musicxml` / `.mxl` を選ぶ → A4 縦に組まれた楽譜が出る → 「印刷」。
