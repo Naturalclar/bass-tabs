@@ -19,21 +19,30 @@ Vite + React + TypeScript / 描画は [OpenSheetMusicDisplay](https://opensheetm
 
 project site なので配信パスは `/bass-tabs/`。この文字列は `base-path.ts` に 1 箇所だけ置いて、
 Vite の `base` と Playwright の遷移先の両方がそこを参照している（片方だけ直す事故を防ぐため）。
-`npm run dev` も同じパスで動く（<http://localhost:5173/bass-tabs/>）。dev と本番で
+`pnpm dev` も同じパスで動く（<http://localhost:5173/bass-tabs/>）。dev と本番で
 パスの解決を変えないため、意図的にそうしている。
 
 **リポジトリ側の設定**: Settings → Pages の source を「GitHub Actions」にしておく必要がある。
 
 **デプロイは CI の成否では止まらない。** Pages と CI は別ワークフローなので `needs:` で繋げない。
-Pages 側のビルドは `npm run build`（typecheck 込み）なので型エラーとビルド失敗は止まるが、
+Pages 側のビルドは `pnpm build`（typecheck 込み）なので型エラーとビルド失敗は止まるが、
 lint と print チェックの失敗はデプロイを止めない。困るようなら `workflow_run` で繋ぐ。
 
 ## 使い方
 
 ```sh
-npm install
-npm run dev        # 開発サーバ (http://localhost:5173/bass-tabs/)
+pnpm install
+pnpm dev        # 開発サーバ (http://localhost:5173/bass-tabs/)
 ```
+
+パッケージマネージャは **pnpm**。バージョンは `package.json` の `packageManager` で固定してあるので、
+corepack 経由なら合わせる必要は無い。`node_modules` は既定の非フラット構成のままにしている
+（巻き上げに頼った参照を許すと、CI と手元で解決結果が変わる余地を残すことになるため）。
+
+依存のビルドスクリプトは既定で全て実行しない（`pnpm.onlyBuiltDependencies` が空）。npm では
+OSMD の依存の `gl`（headless-gl、ネイティブビルド）がビルドされていたが、このアプリは
+ブラウザで SVG バックエンドを使うだけでネイティブモジュールを読まないので不要。
+`pnpm.ignoredBuiltDependencies` に挙げて、警告ではなく意図として記録してある。
 
 「ファイルを開く」で `.xml` / `.musicxml` / `.mxl` を選ぶ → A4 縦に組まれた楽譜が出る → 「印刷」。
 サーバもアップロードも無く、ファイルはブラウザ内でのみ処理される。
@@ -44,13 +53,13 @@ npm run dev        # 開発サーバ (http://localhost:5173/bass-tabs/)
 
 | コマンド | 内容 |
 | --- | --- |
-| `npm run dev` | 開発サーバ |
-| `npm run build` | `typecheck` してから本番ビルド |
-| `npm run preview` | ビルド結果の確認 |
-| `npm run lint` | oxlint |
-| `npm run typecheck` | `tsc -b --noEmit` |
-| `npm run check` | lint + typecheck |
-| `npm run test:print` | 印刷リグレッションチェック（ビルド → 配信 → PDF 出力まで実行） |
+| `pnpm dev` | 開発サーバ |
+| `pnpm build` | `typecheck` してから本番ビルド |
+| `pnpm preview` | ビルド結果の確認 |
+| `pnpm lint` | oxlint |
+| `pnpm typecheck` | `tsc -b --noEmit` |
+| `pnpm check` | lint + typecheck |
+| `pnpm test:print` | 印刷リグレッションチェック（ビルド → 配信 → PDF 出力まで実行） |
 
 ### なぜ oxlint と tsc の両方なのか
 
@@ -62,13 +71,13 @@ oxlint は速度を理由に選んでいるが、型情報を使う検査（type
 ## 印刷リグレッションチェック
 
 ```sh
-npm run test:print
+pnpm test:print
 ```
 
 印刷結果はこのアプリの成果物そのものだが、oxlint も `tsc` も見ることができない
 （ページ数は OSMD の改ページ、紙のサイズはプリンタが解決する CSS が決めるため）。
 そこで Playwright で実際にビルド・配信・PDF 出力まで通して検査する（`tests/print.spec.ts`）。
-サーバは設定側で起動するので、事前に `npm run dev` を動かしておく必要は無い。
+サーバは設定側で起動するので、事前に `pnpm dev` を動かしておく必要は無い。
 
 検査している内容と、それぞれが**どの不具合を捕まえるか**（いずれもコードを壊して
 対応するテストが落ちることを確認済み）:

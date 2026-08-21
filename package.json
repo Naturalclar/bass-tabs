@@ -3,13 +3,14 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "pnpm@10.33.0",
   "scripts": {
     "dev": "vite",
-    "build": "npm run typecheck && vite build",
+    "build": "pnpm typecheck && vite build",
     "preview": "vite preview",
     "lint": "oxlint",
     "typecheck": "tsc -b --noEmit",
-    "check": "npm run lint && npm run typecheck",
+    "check": "pnpm lint && pnpm typecheck",
     "test:print": "playwright test"
   },
   "dependencies": {
@@ -26,5 +27,11 @@
     "oxlint": "^1.79.0",
     "typescript": "~6.0.2",
     "vite": "^8.2.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [],
+    "ignoredBuiltDependencies": [
+      "gl"
+    ]
   }
 }
