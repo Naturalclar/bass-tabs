@@ -50,7 +50,11 @@ The whole app is three moving parts:
   `makePagesScalable()` post-processes OSMD's output DOM; that function is the fragile part of the
   codebase and its comments explain why each step exists.
 - `src/index.css` — screen layout plus the `@media print` block. Paper size is stated here once
-  (`210mm × 297mm`), which only works because pages carry a `viewBox`.
+  (`210mm × 297mm`), which only works because pages carry a `viewBox`. The screen UI is dark at
+  every surface it paints, `:root` declares `color-scheme: dark` to match, and **every control
+  states its own `color`** — a background without one inherits the UA's near-white control text and
+  vanishes. `tests/editor.spec.ts` asserts contrast rather than colour values so a repalette is
+  free but a regression is not.
 
 ### The editor is a MusicXML generator, not a second renderer
 

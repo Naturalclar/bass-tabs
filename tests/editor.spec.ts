@@ -106,3 +106,64 @@ test('an exported score can be loaded back in', async ({ page }, testInfo) => {
   await expect(page.getByRole('status')).toContainText('ページ (A4 縦)')
   await expect(page.locator('svg.score-page')).toHaveCount(1)
 })
+
+/**
+ * The panel first shipped with `background: #fff` and no `color` while the
+ * document declared `color-scheme: light dark`. Under a dark scheme the UA
+ * paints control text near-white, so every field was white on white -- the app
+ * looked fine to a light-mode screenshot and was unusable in dark mode.
+ *
+ * Contrast is asserted rather than colour values so the check survives a
+ * repalette but still fails if text and background ever converge again.
+ */
+test.describe('dark colour scheme', () => {
+  test.use({ colorScheme: 'dark' })
+
+  test('every editor control keeps its text readable', async ({ page }) => {
+    await openEditor(page)
+    await fillFirstMeasure(page, 'E')
+
+    const contrasts = await page.evaluate(() => {
+      const channel = (value: number) => {
+        const v = value / 255
+        return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+      }
+      const luminance = (color: string) => {
+        const [r, g, b] = (color.match(/\d+/g) ?? ['0', '0', '0']).slice(0, 3).map(Number)
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+      }
+      // Walks up for the nearest painted background, since controls sitting on
+      // a transparent parent still read against whatever is behind them.
+      const backgroundOf = (element: Element): string => {
+        for (let node: Element | null = element; node; node = node.parentElement) {
+          const color = getComputedStyle(node).backgroundColor
+          if (color && color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') return color
+        }
+        return 'rgb(255, 255, 255)'
+      }
+      const selectors = [
+        '.editor-field select',
+        ".editor-field input[type='number']",
+        '.editor-field input:not([type])',
+        '.chip',
+        '.editor-field',
+        '.editor-help',
+        '.tab-cell--note',
+      ]
+      return selectors.map((selector) => {
+        const element = document.querySelector(selector)
+        if (!element) return { selector, ratio: 0 }
+        const styles = getComputedStyle(element)
+        const [a, b] = [luminance(styles.color), luminance(backgroundOf(element))].sort(
+          (x, y) => y - x,
+        )
+        return { selector, ratio: (a + 0.05) / (b + 0.05) }
+      })
+    })
+
+    for (const { selector, ratio } of contrasts) {
+      // 4.5:1 is the WCAG AA threshold for body text.
+      expect(ratio, `${selector} contrast`).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+})
