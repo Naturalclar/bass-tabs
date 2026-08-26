@@ -17,14 +17,26 @@ import { MAX_FRET, STRINGS } from './tuning.ts'
  * person starts from an empty score, which is recoverable; a blank page is not.
  */
 
-const STORAGE_KEY = 'bass-tabs:score'
+/**
+ * One key per score, plus an index naming them and remembering which one was
+ * open. Keeping each score in its own key is what lets an edit write only the
+ * score being edited: the app saves on every keystroke, and rewriting the whole
+ * library that often would get slower with every score added.
+ *
+ * The index deliberately holds no titles. A title would then live in two places
+ * and have to be kept in step on every keystroke; instead the library is read
+ * in full at startup -- the scores are small and there are only ever as many as
+ * one person writes -- and the list is served from memory after that.
+ */
+const INDEX_KEY = 'bass-tabs:index'
+const SCORE_KEY_PREFIX = 'bass-tabs:score:'
 
 /**
  * Bumping this discards every stored score. Do that when the shape of `Score`
  * changes in a way the validator below would still accept -- a renamed field
  * with a compatible type, a changed unit, a changed meaning.
  */
-const STORAGE_VERSION = 1
+const STORAGE_VERSION = 2
 
 const BEAT_TYPES = [1, 2, 4, 8, 16]
 
@@ -73,33 +85,77 @@ function isScore(value: unknown): value is Score {
   )
 }
 
-/** The saved score, or null when there is nothing usable to restore. */
-export function readStoredScore(): Score | null {
-  let parsed: unknown
+export type ScoreId = string
+
+/** A score plus the id the library knows it by. Titles are for people; ids are for us. */
+export type StoredScore = { id: ScoreId; score: Score }
+
+export type Library = { scores: StoredScore[]; currentId: ScoreId | null }
+
+export function newScoreId(): ScoreId {
+  return crypto.randomUUID()
+}
+
+function read(key: string): unknown {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
-    parsed = JSON.parse(raw)
+    const raw = localStorage.getItem(key)
+    return raw === null ? null : JSON.parse(raw)
   } catch {
     // Unparseable, or storage itself throwing (a private window can).
     return null
   }
-
-  if (isRecord(parsed) && 'version' in parsed) {
-    if (parsed.version !== STORAGE_VERSION) return null
-    return isScore(parsed.score) ? parsed.score : null
-  }
-
-  // Written before the envelope existed: keep it if it still validates, so
-  // upgrading does not throw away work in progress.
-  return isScore(parsed) ? parsed : null
 }
 
-export function writeStoredScore(score: Score): void {
+function write(key: string, value: unknown): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: STORAGE_VERSION, score }))
+    localStorage.setItem(key, JSON.stringify(value))
   } catch {
     // Out of quota or storage blocked: losing persistence is not worth
     // interrupting the person mid-edit.
+  }
+}
+
+function readScore(id: ScoreId): Score | null {
+  const parsed = read(SCORE_KEY_PREFIX + id)
+  if (!isRecord(parsed) || parsed.version !== STORAGE_VERSION) return null
+  return isScore(parsed.score) ? parsed.score : null
+}
+
+/**
+ * Everything worth restoring. A score that fails validation is dropped rather
+ * than handed on: the stored value is the one input nothing type-checks, and a
+ * shape the app cannot read would otherwise fail on *every* reload with no way
+ * back from the UI.
+ */
+export function readLibrary(): Library {
+  const parsed = read(INDEX_KEY)
+  if (!isRecord(parsed) || parsed.version !== STORAGE_VERSION) return { scores: [], currentId: null }
+  const ids = Array.isArray(parsed.ids) ? parsed.ids.filter((id) => typeof id === 'string') : []
+
+  const scores: StoredScore[] = []
+  for (const id of ids) {
+    const score = readScore(id)
+    if (score) scores.push({ id, score })
+  }
+  const currentId =
+    typeof parsed.currentId === 'string' && scores.some((entry) => entry.id === parsed.currentId)
+      ? parsed.currentId
+      : (scores[0]?.id ?? null)
+  return { scores, currentId }
+}
+
+export function writeIndex(ids: ScoreId[], currentId: ScoreId | null): void {
+  write(INDEX_KEY, { version: STORAGE_VERSION, ids, currentId })
+}
+
+export function writeScore(id: ScoreId, score: Score): void {
+  write(SCORE_KEY_PREFIX + id, { version: STORAGE_VERSION, score })
+}
+
+export function removeScore(id: ScoreId): void {
+  try {
+    localStorage.removeItem(SCORE_KEY_PREFIX + id)
+  } catch {
+    // Same as write: not worth interrupting anyone over.
   }
 }

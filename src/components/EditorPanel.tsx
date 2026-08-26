@@ -34,7 +34,6 @@ type Props = {
   canRedo: boolean
   onConnectMidi: () => void
   onExport: () => void
-  onReset: () => void
 }
 
 const TIMES: TimeSignature[] = [
@@ -238,9 +237,6 @@ export function EditorPanel(props: Props) {
         </button>
         <button type="button" className="button" onClick={props.onExport}>
           MusicXML を書き出す
-        </button>
-        <button type="button" className="button" onClick={props.onReset}>
-          新規
         </button>
       </div>
 

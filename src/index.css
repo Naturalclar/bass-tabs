@@ -319,6 +319,123 @@ body {
   background: var(--ui-divider);
 }
 
+/* --- saved scores ------------------------------------------------------- */
+
+.workspace {
+  display: flex;
+  align-items: flex-start;
+}
+
+.workspace__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar {
+  flex: 0 0 14rem;
+  align-self: stretch;
+  padding: 0.75rem;
+  background: var(--ui-bg);
+  color: var(--ui-fg);
+  border-right: 1px solid var(--ui-divider);
+}
+
+.sidebar__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.sidebar__title {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ui-muted);
+}
+
+.sidebar__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.score-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.15rem;
+  border-radius: 4px;
+}
+
+.score-row--current {
+  background: #2d4a72;
+}
+
+.score-row__open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  padding: 0.35rem 0.45rem;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ui-fg);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.score-row__open:hover {
+  background: var(--ui-control-bg);
+}
+
+.score-row--current .score-row__open:hover {
+  background: transparent;
+}
+
+.score-row__meta {
+  font-size: 0.7rem;
+  color: var(--ui-muted);
+}
+
+.score-row--current .score-row__meta {
+  color: #cbd8ea;
+}
+
+.score-row__delete {
+  font: inherit;
+  width: 1.6rem;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ui-muted);
+  cursor: pointer;
+}
+
+.score-row__delete:hover {
+  background: var(--ui-control-bg);
+  color: var(--ui-fg);
+}
+
+@media (max-width: 720px) {
+  .workspace {
+    display: block;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--ui-divider);
+  }
+}
+
 @page {
   size: A4 portrait;
   margin: 0;
@@ -332,8 +449,15 @@ body {
   .toolbar,
   .editor-panel,
   .tab-editor,
+  .sidebar,
   .sheet__placeholder {
     display: none !important;
+  }
+
+  /* Without the sidebar there is nothing to sit beside; let the score have
+     the full width the print rules assume. */
+  .workspace {
+    display: block;
   }
 
   .sheet {

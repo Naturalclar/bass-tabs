@@ -10,7 +10,15 @@ import {
   type TimeSignature,
 } from './model.ts'
 import { toMusicXml } from './musicxml.ts'
-import { readStoredScore, writeStoredScore } from './storage.ts'
+import {
+  newScoreId,
+  readLibrary,
+  removeScore,
+  writeIndex,
+  writeScore,
+  type ScoreId,
+  type StoredScore,
+} from './storage.ts'
 import { MAX_FRET, STRINGS, restring, transpose } from './tuning.ts'
 
 /** Where the next entry goes: which measure, and how far into it. */
@@ -42,22 +50,47 @@ export type EditorState = {
   fret: number
 }
 
+/** A library that always holds at least one score, so there is always one open. */
+function initialLibrary(): { scores: StoredScore[]; currentId: ScoreId } {
+  const stored = readLibrary()
+  if (stored.currentId && stored.scores.length > 0) {
+    return { scores: stored.scores, currentId: stored.currentId }
+  }
+  const first = { id: newScoreId(), score: emptyScore() }
+  return { scores: [first], currentId: first.id }
+}
+
 export function useEditor() {
-  const [score, setScore] = useState<Score>(() => readStoredScore() ?? emptyScore())
+  const [library, setLibrary] = useState(initialLibrary)
+  const { scores, currentId } = library
+  const score = scores.find((entry) => entry.id === currentId)?.score ?? emptyScore()
   const [cursor, setCursor] = useState<Cursor>({ measure: 0, index: 0 })
   const [value, setValue] = useState<NoteValue>(4)
   const [dotted, setDotted] = useState(false)
   const [fret, setFret] = useState(0)
   /** The string arrow keys move over and digit keys write to. */
   const [stringNumber, setStringNumber] = useState(STRINGS[STRINGS.length - 1].number)
+  const setScore = useCallback(
+    (next: Score) => {
+      setLibrary((current) => ({
+        ...current,
+        scores: current.scores.map((entry) =>
+          entry.id === current.currentId ? { ...entry, score: next } : entry,
+        ),
+      }))
+    },
+    [],
+  )
   const [past, setPast] = useState<Snapshot[]>([])
   const [future, setFuture] = useState<Snapshot[]>([])
   /** The key of the last commit, for collapsing a run of edits into one step. */
   const lastKey = useRef<CommitKey>(null)
 
+  // Only the score being edited is written on a keystroke. The index changes
+  // when scores are added, removed or switched, so those write it themselves.
   useEffect(() => {
-    writeStoredScore(score)
-  }, [score])
+    writeScore(currentId, score)
+  }, [currentId, score])
 
   const musicXml = useMemo(() => toMusicXml(score), [score])
 
@@ -97,7 +130,7 @@ export function useEditor() {
       setScore(next)
       setCursor(nextCursor)
     },
-    [cursor, score],
+    [cursor, score, setScore],
   )
 
   const place = useCallback(
@@ -269,11 +302,74 @@ export function useEditor() {
     [commit, cursor, score],
   )
 
-  const reset = useCallback(() => {
-    // Undoable on purpose: 新規 throws away everything, and mis-clicking it is
-    // exactly the situation undo exists for.
-    commit(emptyScore(), { measure: 0, index: 0 })
-  }, [commit])
+  /**
+   * Moves to another score. The undo history stays behind: it describes edits
+   * to the score being left, and replaying them onto a different one would put
+   * this score's notes into that score.
+   */
+  const selectScore = useCallback(
+    (id: ScoreId) => {
+      if (id === currentId) return
+      setLibrary((current) =>
+        current.scores.some((entry) => entry.id === id) ? { ...current, currentId: id } : current,
+      )
+      writeIndex(
+        scores.map((entry) => entry.id),
+        id,
+      )
+      setCursor({ measure: 0, index: 0 })
+      setPast([])
+      setFuture([])
+      lastKey.current = null
+    },
+    [currentId, scores],
+  )
+
+  /** Adds an empty score and opens it. The scores already saved stay put. */
+  const addScore = useCallback(() => {
+    const entry = { id: newScoreId(), score: emptyScore() }
+    setLibrary((current) => ({
+      scores: [...current.scores, entry],
+      currentId: entry.id,
+    }))
+    writeScore(entry.id, entry.score)
+    writeIndex([...scores.map((existing) => existing.id), entry.id], entry.id)
+    setCursor({ measure: 0, index: 0 })
+    setPast([])
+    setFuture([])
+    lastKey.current = null
+  }, [scores])
+
+  /**
+   * Deletes a score for good -- undo cannot reach it, because the history
+   * describes edits inside a score, not the library around it. The UI asks
+   * first for that reason. Deleting the last one leaves a fresh empty score, so
+   * there is always something open.
+   */
+  const deleteScore = useCallback(
+    (id: ScoreId) => {
+      const remaining = scores.filter((entry) => entry.id !== id)
+      const next =
+        remaining.length > 0 ? remaining : [{ id: newScoreId(), score: emptyScore() }]
+      const nextId = remaining.some((entry) => entry.id === currentId)
+        ? currentId
+        : (next[0]?.id ?? '')
+      setLibrary({ scores: next, currentId: nextId })
+      removeScore(id)
+      if (remaining.length === 0) writeScore(next[0].id, next[0].score)
+      writeIndex(
+        next.map((entry) => entry.id),
+        nextId,
+      )
+      if (nextId !== currentId) {
+        setCursor({ measure: 0, index: 0 })
+        setPast([])
+        setFuture([])
+        lastKey.current = null
+      }
+    },
+    [currentId, scores],
+  )
 
   /**
    * The entry the arrow keys act on: the one under the cursor, or -- when the
@@ -336,7 +432,7 @@ export function useEditor() {
     setScore(previous.score)
     setCursor(previous.cursor)
     lastKey.current = null
-  }, [cursor, past, score])
+  }, [cursor, past, score, setScore])
 
   const redo = useCallback(() => {
     const next = future.at(-1)
@@ -346,7 +442,7 @@ export function useEditor() {
     setScore(next.score)
     setCursor(next.cursor)
     lastKey.current = null
-  }, [cursor, future, score])
+  }, [cursor, future, score, setScore])
 
   const remaining = measureRemaining(score.measures[cursor.measure] ?? [], score.time)
 
@@ -373,7 +469,11 @@ export function useEditor() {
     setKeyFifths,
     setTitle,
     setMeasureCount,
-    reset,
+    scores,
+    currentId,
+    selectScore,
+    addScore,
+    deleteScore,
     undo,
     redo,
     canUndo: past.length > 0,
