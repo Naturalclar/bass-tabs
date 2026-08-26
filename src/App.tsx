@@ -187,10 +187,12 @@ export default function App() {
           break
         }
         case 'ArrowLeft':
-          editor.moveCursor(-1)
+          if (event.shiftKey) editor.moveMeasure(-1)
+          else editor.moveCursor(-1)
           break
         case 'ArrowRight':
-          editor.moveCursor(1)
+          if (event.shiftKey) editor.moveMeasure(1)
+          else editor.moveCursor(1)
           break
         case '.':
           editor.setDotted(!editor.dotted)

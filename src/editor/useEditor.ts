@@ -288,6 +288,18 @@ export function useEditor() {
     [score.measures],
   )
 
+  /** Jumps a whole measure, landing on its first slot. */
+  const moveMeasure = useCallback(
+    (delta: number) => {
+      lastKey.current = null
+      setCursor((c) => {
+        const measure = Math.min(Math.max(c.measure + delta, 0), score.measures.length - 1)
+        return measure === c.measure ? c : { measure, index: 0 }
+      })
+    },
+    [score.measures.length],
+  )
+
   const setTime = useCallback(
     (time: TimeSignature) => {
       // Existing entries can overflow a shorter bar; trim rather than silently
@@ -538,6 +550,7 @@ export function useEditor() {
     putRest,
     removeAtCursor,
     moveCursor,
+    moveMeasure,
     setTime,
     setKeyFifths,
     setTitle,

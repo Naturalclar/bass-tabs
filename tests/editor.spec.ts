@@ -685,6 +685,47 @@ test.describe('編集中のスクロール位置', () => {
  * The arrows move the note the grid is highlighting: unmodified they change its
  * pitch, with Shift they change which string plays that same pitch.
  */
+test.describe('Shift+←→ で小節を移動する', () => {
+  const selectedIn = (page: Page, measure: number) =>
+    page.locator('.tab-measure').nth(measure).locator('.tab-column--selected')
+
+  test('小節の先頭へ跳び、端では止まる', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('3')
+    await page.keyboard.press('5')
+
+    await page.keyboard.press('Shift+ArrowRight')
+    // 2 小節目の先頭 (空の小節なので追加スロットが選ばれる)。
+    await expect(selectedIn(page, 1)).toHaveCount(1)
+
+    await page.keyboard.press('Shift+ArrowLeft')
+    await expect(selectedIn(page, 0).locator('.tab-cell--note')).toHaveText('3')
+
+    // 端: 最初の小節より前、最後の小節より後には行かない。
+    await page.keyboard.press('Shift+ArrowLeft')
+    await expect(selectedIn(page, 0)).toHaveCount(1)
+    for (let i = 0; i < 6; i++) await page.keyboard.press('Shift+ArrowRight')
+    await expect(selectedIn(page, 3)).toHaveCount(1)
+    expect(await page.locator('.tab-measure').count()).toBe(4)
+  })
+
+  test('跳んだ先に打った音はその小節に入る', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('3')
+    await page.keyboard.press('Shift+ArrowRight')
+    await page.keyboard.press('7')
+
+    const perBar = await page
+      .locator('.tab-measure')
+      .evaluateAll((bars) =>
+        bars.map((bar) => [...bar.querySelectorAll('.tab-cell--note')].map((c) => c.textContent)),
+      )
+    expect(perBar.slice(0, 2)).toEqual([['3'], ['7']])
+  })
+})
+
 test.describe('矢印キーで音を動かす', () => {
   /** Each note as "<string><fret>", e.g. "E5" for the 5th fret of the E string. */
   const notes = (page: Page) =>
