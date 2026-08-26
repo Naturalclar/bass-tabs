@@ -269,6 +269,26 @@ test.describe('小節をまたぐ入力', () => {
 })
 
 /**
+ * Two digits are one fret only while they name a fret that exists. Clamping
+ * "3" then "3" to the top fret was worse than useless: it threw away the note
+ * the first digit wrote and ate the second keystroke, so a run of same-digit
+ * frets collapsed into a single 24.
+ */
+test('2 桁にならない数字は次の音になる', async ({ page }) => {
+  await openEditor(page)
+  await page.locator('.tab-editor').focus()
+
+  for (let i = 0; i < 3; i++) await page.keyboard.press('3')
+  await expect(page.locator('.tab-cell--note')).toHaveText(['3', '3', '3'])
+
+  // A run sitting on 0 is the same case: no fret is written "05", so the 7 is
+  // its own note -- it does not rewrite the 0 as fret 5.
+  await page.keyboard.press('0')
+  await page.keyboard.press('7')
+  await expect(page.locator('.tab-cell--note')).toHaveText(['3', '3', '3', '0', '7'])
+})
+
+/**
  * The saved score is the one input nothing type-checks: it was written by
  * whatever version of the code ran last. Because it is persisted, a shape the
  * app cannot read does not fail once -- it fails on every reload, and the 新規
