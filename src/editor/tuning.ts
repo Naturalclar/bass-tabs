@@ -86,3 +86,38 @@ export function positionFor(midi: number): { string: number; fret: number } | nu
   }
   return null
 }
+
+/** A fretted position, independent of which entry holds it. */
+export type Position = { string: number; fret: number }
+
+/**
+ * Moves a position by semitones, staying on the same string while it can.
+ *
+ * Staying put matters: a note sitting comfortably in the middle of a string
+ * should not hop lanes just because the pitch moved by one. Only when the fret
+ * would leave the neck does the same pitch get re-fingered somewhere else --
+ * which is what makes "one semitone down" work at all on an open string.
+ *
+ * Returns null when the bass cannot play the resulting pitch anywhere.
+ */
+export function transpose(position: Position, semitones: number): Position | null {
+  const fret = position.fret + semitones
+  if (fret >= 0 && fret <= MAX_FRET) return { string: position.string, fret }
+  return positionFor(midiFor(position.string, position.fret) + semitones)
+}
+
+/**
+ * The same pitch played on a neighbouring string: a fingering change, not a
+ * pitch change. `delta` is -1 for the next string up in pitch, matching the
+ * arrow that moves that way -- `<string>` numbers run the other direction.
+ *
+ * Returns null at the outer strings, or when the pitch does not reach the new
+ * string's range.
+ */
+export function restring(position: Position, delta: number): Position | null {
+  const target = position.string + delta
+  if (!STRINGS.some((string) => string.number === target)) return null
+  const fret = midiFor(position.string, position.fret) - stringByNumber(target).midi
+  if (fret < 0 || fret > MAX_FRET) return null
+  return { string: target, fret }
+}

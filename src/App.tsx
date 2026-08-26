@@ -94,7 +94,8 @@ export default function App() {
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       const key = event.key
-      // Ctrl/Cmd combinations belong to the window handler above.
+      // Ctrl/Cmd combinations belong to the window handler above. Shift is not
+      // one of them: it selects the string variant of the arrow keys.
       if (event.metaKey || event.ctrlKey) return
       if (/^[0-9]$/.test(key)) {
         const now = Date.now()
@@ -126,14 +127,27 @@ export default function App() {
       }
 
       switch (key) {
+        // Up and down move the selected note by a semitone; with Shift they
+        // move it across strings at the same pitch. With nothing selected there
+        // is no note to move, so Shift falls back to choosing the string the
+        // next note goes on -- otherwise entry by keyboard alone could not pick
+        // a string at all.
         case 'ArrowUp':
-          editor.setStringNumber(Math.max(STRINGS[0].number, editor.stringNumber - 1))
-          break
-        case 'ArrowDown':
+        case 'ArrowDown': {
+          const towardsHigherPitch = key === 'ArrowUp'
+          if (!event.shiftKey) {
+            editor.moveNote({ semitones: towardsHigherPitch ? 1 : -1 })
+            break
+          }
+          editor.moveNote({ strings: towardsHigherPitch ? -1 : 1 })
+          // `<string>` numbers count down from the highest-pitched string.
           editor.setStringNumber(
-            Math.min(STRINGS[STRINGS.length - 1].number, editor.stringNumber + 1),
+            towardsHigherPitch
+              ? Math.max(STRINGS[0].number, editor.stringNumber - 1)
+              : Math.min(STRINGS[STRINGS.length - 1].number, editor.stringNumber + 1),
           )
           break
+        }
         case 'ArrowLeft':
           editor.moveCursor(-1)
           break

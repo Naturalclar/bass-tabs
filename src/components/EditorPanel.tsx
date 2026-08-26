@@ -245,7 +245,8 @@ export function EditorPanel(props: Props) {
       </div>
 
       <p className="editor-help">
-        レーンをクリックで音を置く。数字キーでフレット、↑↓ で弦、←→ でカーソル移動、
+        レーンをクリックで音を置く。数字キーでフレット、↑↓ で半音上下、
+        <kbd>Shift</kbd>+↑↓ で弦の持ち替え、←→ でカーソル移動、
         <kbd>w</kbd> <kbd>h</kbd> <kbd>q</kbd> <kbd>e</kbd> <kbd>s</kbd> で音価、
         <kbd>.</kbd> で付点、<kbd>r</kbd> で休符、<kbd>Backspace</kbd> で削除。
         <kbd>Ctrl/⌘+Z</kbd> で取り消し、<kbd>Ctrl/⌘+Shift+Z</kbd> でやり直し。

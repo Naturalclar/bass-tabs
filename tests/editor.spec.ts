@@ -439,6 +439,107 @@ test.describe('編集中のスクロール位置', () => {
   })
 })
 
+/**
+ * The arrows move the note the grid is highlighting: unmodified they change its
+ * pitch, with Shift they change which string plays that same pitch.
+ */
+test.describe('矢印キーで音を動かす', () => {
+  /** Each note as "<string><fret>", e.g. "E5" for the 5th fret of the E string. */
+  const notes = (page: Page) =>
+    page
+      .locator('.tab-cell--note')
+      .evaluateAll((cells) =>
+        cells.map(
+          (cell) =>
+            (cell.getAttribute('aria-label') ?? '').match(/([GDAE]) 弦/)?.[1] + cell.textContent,
+        ),
+      )
+
+  async function noteOnE5(page: Page) {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('5')
+    expect(await notes(page)).toEqual(['E5'])
+  }
+
+  test('↑↓ が半音ずつ動かす', async ({ page }) => {
+    await noteOnE5(page)
+    await page.keyboard.press('ArrowUp')
+    expect(await notes(page)).toEqual(['E6'])
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('ArrowDown')
+    expect(await notes(page)).toEqual(['E4'])
+  })
+
+  test('フレットの端では隣の弦へ運ばれる', async ({ page }) => {
+    await noteOnE5(page)
+    await page.keyboard.press('Shift+ArrowUp')
+    expect(await notes(page)).toEqual(['A0'])
+
+    // Below the nut on the A string, so the same pitch moves to the E string.
+    await page.keyboard.press('ArrowDown')
+    expect(await notes(page)).toEqual(['E4'])
+  })
+
+  test('最低音より下げようとしても何も起きない', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('0')
+    expect(await notes(page)).toEqual(['E0'])
+
+    await page.keyboard.press('ArrowDown')
+    expect(await notes(page)).toEqual(['E0'])
+  })
+
+  test('Shift+↑↓ は音を変えずに弦を持ち替える', async ({ page }) => {
+    await noteOnE5(page)
+    await page.keyboard.press('Shift+ArrowUp')
+    expect(await notes(page)).toEqual(['A0'])
+    await page.keyboard.press('Shift+ArrowDown')
+    expect(await notes(page)).toEqual(['E5'])
+  })
+
+  test('その弦で出せない音は持ち替えない', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('0')
+    // E1 is below the A string's open note, so there is nowhere to go.
+    await page.keyboard.press('Shift+ArrowUp')
+    expect(await notes(page)).toEqual(['E0'])
+  })
+
+  test('休符は動かない', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('r')
+    await expect(page.locator('.tab-column__rest')).toHaveCount(1)
+
+    await page.keyboard.press('ArrowUp')
+    await page.keyboard.press('Shift+ArrowUp')
+    await expect(page.locator('.tab-column__rest')).toHaveCount(1)
+    expect(await notes(page)).toEqual([])
+  })
+
+  test('連続した移動は 1 回で戻る', async ({ page }) => {
+    await noteOnE5(page)
+    for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowUp')
+    expect(await notes(page)).toEqual(['E8'])
+
+    await page.keyboard.press('ControlOrMeta+z')
+    expect(await notes(page)).toEqual(['E5'])
+  })
+
+  test('選択中の音が無ければ Shift+↑↓ は次に置く弦を選ぶ', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+
+    // Nothing written yet, so this only moves where the next note will land.
+    await page.keyboard.press('Shift+ArrowUp')
+    await page.keyboard.press('3')
+    expect(await notes(page)).toEqual(['A3'])
+  })
+})
+
 test('an exported score can be loaded back in', async ({ page }, testInfo) => {
   await openEditor(page)
   await fillFirstMeasure(page, 'A')

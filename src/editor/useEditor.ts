@@ -11,7 +11,7 @@ import {
 } from './model.ts'
 import { toMusicXml } from './musicxml.ts'
 import { readStoredScore, writeStoredScore } from './storage.ts'
-import { MAX_FRET, STRINGS } from './tuning.ts'
+import { MAX_FRET, STRINGS, restring, transpose } from './tuning.ts'
 
 /** Where the next entry goes: which measure, and how far into it. */
 export type Cursor = { measure: number; index: number }
@@ -275,6 +275,59 @@ export function useEditor() {
     commit(emptyScore(), { measure: 0, index: 0 })
   }, [commit])
 
+  /**
+   * The entry the arrow keys act on: the one under the cursor, or -- when the
+   * cursor sits on the empty append slot, which is where it lands right after
+   * writing -- the one just before it. Either way it is the column the grid is
+   * highlighting, so the note that moves is the note that looks selected.
+   */
+  const targetIndex = useCallback((): number | null => {
+    const entries = score.measures[cursor.measure] ?? []
+    if (entries[cursor.index]) return cursor.index
+    if (entries[cursor.index - 1]) return cursor.index - 1
+    return null
+  }, [cursor, score.measures])
+
+  /**
+   * Moves the selected note, either in pitch (`semitones`) or across strings at
+   * the same pitch (`strings`). Rests have no pitch, and a move off the end of
+   * the neck has nowhere to go: both leave the score alone.
+   *
+   * Repeated presses collapse into one undo step, keyed by position, so nudging
+   * a note four semitones is one step back rather than four.
+   */
+  const moveNote = useCallback(
+    ({ semitones = 0, strings = 0 }: { semitones?: number; strings?: number }) => {
+      const index = targetIndex()
+      if (index === null) return
+      const entries = score.measures[cursor.measure] ?? []
+      const entry = entries[index]
+      if (entry.kind !== 'note') return
+      const moved = semitones
+        ? transpose({ string: entry.string, fret: entry.fret }, semitones)
+        : restring({ string: entry.string, fret: entry.fret }, strings)
+      if (!moved) return
+      // The next note follows the string and fret this one ended on.
+      setStringNumber(moved.string)
+      setFret(moved.fret)
+      commit(
+        {
+          ...score,
+          measures: score.measures.map((measure, i) =>
+            i !== cursor.measure
+              ? measure
+              : measure.map((existing, j) =>
+                  j === index ? { ...entry, string: moved.string, fret: moved.fret } : existing,
+                ),
+          ),
+        },
+        cursor,
+        `move:${cursor.measure}:${index}`,
+      )
+    },
+    [commit, cursor, score, targetIndex],
+  )
+
   const undo = useCallback(() => {
     const previous = past.at(-1)
     if (!previous) return
@@ -311,6 +364,7 @@ export function useEditor() {
     setStringNumber,
     remaining,
     putNote,
+    moveNote,
     setFretAt,
     putRest,
     removeAtCursor,
