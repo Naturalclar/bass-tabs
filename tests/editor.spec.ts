@@ -1809,8 +1809,7 @@ test.describe('再生のスケジュール', () => {
 
   const note = (fret: number, value: NoteValue = 4, dotted = false): Entry => ({
     kind: 'note',
-    string: 4,
-    fret,
+    notes: [{ string: 4, fret }],
     value,
     dotted,
   })
@@ -1819,6 +1818,24 @@ test.describe('再生のスケジュール', () => {
     measures: Entry[][],
     time: TimeSignature = { beats: 4, beatType: 4 },
   ): Score => ({ title: '', keyFifths: 0, time, measures })
+
+  test('和音は同じ時刻に全部鳴る', () => {
+    const chord: Entry = {
+      kind: 'note',
+      notes: [
+        { string: 4, fret: 0 },
+        { string: 3, fret: 2 },
+      ],
+      value: 4,
+      dotted: false,
+    }
+    const notes = schedule(scoreOf([[chord, note(3)]]))
+    expect(notes).toEqual([
+      { midi: 28, startTicks: 0, durationTicks: quarter },
+      { midi: 35, startTicks: 0, durationTicks: quarter },
+      { midi: 31, startTicks: quarter, durationTicks: quarter },
+    ])
+  })
 
   test('音は実音で鳴り、休符は時間だけ進める', () => {
     const notes = schedule(scoreOf([[note(0), rest(), note(2)]]))
