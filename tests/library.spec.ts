@@ -40,6 +40,21 @@ test.describe('restoring a saved score', () => {
     },
   })
 
+  test('初回訪問の編集もリロードで残る', async ({ page }) => {
+    // No seeding: the very first visit invents its library in memory, and the
+    // index used to be written only by sidebar actions -- so a first session
+    // that never touched the sidebar saved its score under an id no index
+    // named, and a reload silently started over.
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('7')
+    await expect(page.locator('.tab-cell--note')).toHaveText(['7'])
+
+    await page.reload()
+    await page.locator('.tab-editor').waitFor()
+    await expect(page.locator('.tab-cell--note')).toHaveText(['7'])
+  })
+
   test('保存した譜面が一覧ごと戻る', async ({ page }) => {
     await seed(page, {
       'bass-tabs:index': { version: VERSION, ids: ['a', 'b'], currentId: 'b' },

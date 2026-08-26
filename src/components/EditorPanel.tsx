@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import {
   DIVISIONS,
+  MAX_TEMPO,
+  MIN_TEMPO,
   MAX_MEASURES,
   NOTE_VALUES,
   type NoteValue,
   type TimeSignature,
 } from '../editor/model.ts'
 import { MAX_FRET } from '../editor/tuning.ts'
-import { MAX_BPM, MIN_BPM } from '../editor/playback.ts'
+
 import type { MidiStatus } from '../editor/useMidiInput.ts'
 
 type Props = {
@@ -22,8 +24,8 @@ type Props = {
   midi: MidiStatus
   playing: boolean
   canPlay: boolean
-  bpm: number
-  onBpm: (bpm: number) => void
+  tempo: number
+  onTempo: (tempo: number) => void
   onTogglePlay: () => void
   onTitle: (title: string) => void
   onTime: (time: TimeSignature) => void
@@ -142,17 +144,18 @@ function MeasureCountField({
 }
 
 /**
- * Playback tempo. Values inside the range apply as they are typed; anything
- * else stays a draft and snaps back on blur. Nothing is lost by a wrong
- * intermediate value here -- the BPM only steers the speaker -- so this can be
- * looser than MeasureCountField, which guards actual score content.
+ * Tempo. Values inside the range apply as they are typed; anything else stays
+ * a draft and snaps back on blur. The tempo is score content now (printed as
+ * ♩=N), but a wrong intermediate value cannot destroy anything the way a
+ * measure count can -- and the commits coalesce under one key, so the whole
+ * adjustment is one undo step.
  */
-function BpmField({ bpm, onBpm }: { bpm: number; onBpm: (bpm: number) => void }) {
-  const [draft, setDraft] = useState(String(bpm))
-  const [shown, setShown] = useState(bpm)
-  if (bpm !== shown) {
-    setShown(bpm)
-    setDraft(String(bpm))
+function TempoField({ tempo, onTempo }: { tempo: number; onTempo: (tempo: number) => void }) {
+  const [draft, setDraft] = useState(String(tempo))
+  const [shown, setShown] = useState(tempo)
+  if (tempo !== shown) {
+    setShown(tempo)
+    setDraft(String(tempo))
   }
 
   return (
@@ -160,15 +163,15 @@ function BpmField({ bpm, onBpm }: { bpm: number; onBpm: (bpm: number) => void })
       BPM
       <input
         type="number"
-        min={MIN_BPM}
-        max={MAX_BPM}
+        min={MIN_TEMPO}
+        max={MAX_TEMPO}
         value={draft}
         onChange={(e) => {
           setDraft(e.target.value)
           const parsed = Number(e.target.value)
-          if (Number.isFinite(parsed) && parsed >= MIN_BPM && parsed <= MAX_BPM) onBpm(parsed)
+          if (Number.isFinite(parsed) && parsed >= MIN_TEMPO && parsed <= MAX_TEMPO) onTempo(parsed)
         }}
-        onBlur={() => setDraft(String(bpm))}
+        onBlur={() => setDraft(String(tempo))}
       />
     </label>
   )
@@ -276,12 +279,24 @@ export function EditorPanel(props: Props) {
           type="button"
           className="button"
           aria-pressed={props.playing}
+          aria-label={props.playing ? '停止' : '再生'}
+          title={props.playing ? '停止' : '再生'}
           onClick={props.onTogglePlay}
           disabled={!props.playing && !props.canPlay}
         >
-          {props.playing ? '停止' : '再生'}
+          {/* currentColor keeps the icon on the same contrast budget the
+              dark-scheme test measures for text; an emoji would not be. */}
+          {props.playing ? (
+            <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+              <rect x="1" y="1" width="10" height="10" fill="currentColor" />
+            </svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M2 1 L11 6 L2 11 Z" fill="currentColor" />
+            </svg>
+          )}
         </button>
-        <BpmField bpm={props.bpm} onBpm={props.onBpm} />
+        <TempoField tempo={props.tempo} onTempo={props.onTempo} />
         <button
           type="button"
           className="button"

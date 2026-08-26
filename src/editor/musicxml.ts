@@ -136,6 +136,22 @@ function attributesXml(score: Score): string {
   )
 }
 
+/**
+ * The printed tempo: ♩=N above the first system (bass-chart convention), and
+ * the same number as <sound tempo> so other software plays it at this speed.
+ * MusicXML's sound tempo is quarter notes per minute, which is exactly what
+ * `score.tempo` means whatever the meter.
+ */
+function tempoXml(tempo: number): string {
+  return (
+    '      <direction placement="above">\n' +
+    '        <direction-type><metronome><beat-unit>quarter</beat-unit>' +
+    `<per-minute>${tempo}</per-minute></metronome></direction-type>\n` +
+    `        <sound tempo="${tempo}"/>\n` +
+    '      </direction>\n'
+  )
+}
+
 export function toMusicXml(score: Score): string {
   const capacity = measureCapacity(score.time)
 
@@ -146,7 +162,7 @@ export function toMusicXml(score: Score): string {
       const tab = full.map((e) => noteXml(e, 2, score.keyFifths)).join('')
       return (
         `    <measure number="${index + 1}">\n` +
-        (index === 0 ? attributesXml(score) : '') +
+        (index === 0 ? attributesXml(score) + tempoXml(score.tempo) : '') +
         notation +
         `      <backup><duration>${capacity}</duration></backup>\n` +
         tab +

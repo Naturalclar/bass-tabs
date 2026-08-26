@@ -673,7 +673,7 @@ test.describe('編集の純関数', () => {
   const scoreOf = (
     measures: Entry[][],
     time: TimeSignature = { beats: 4, beatType: 4 },
-  ): Score => ({ title: '', keyFifths: 0, time, measures })
+  ): Score => ({ title: '', keyFifths: 0, time, tempo: 160, measures })
 
   test('place は埋まった小節から次の空きへ流し、末尾では小節を増やす', () => {
     const full = [q(1), q(1), q(1), q(1)]

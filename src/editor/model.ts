@@ -55,7 +55,20 @@ export type Score = {
   /** Circle-of-fifths count, as in MusicXML: negative is flats. */
   keyFifths: number
   time: TimeSignature
+  /**
+   * Quarter notes per minute whatever the meter -- the one BPM meaning that
+   * needs no per-meter rules. Part of the score, not a playback knob: it is
+   * printed on the page (♩=N) and written to the exported file.
+   */
+  tempo: number
   measures: Entry[][]
+}
+
+export const MIN_TEMPO = 30
+export const MAX_TEMPO = 300
+
+export function clampTempo(tempo: number): number {
+  return Math.min(Math.max(tempo, MIN_TEMPO), MAX_TEMPO)
 }
 
 export function ticks(value: NoteValue, dotted: boolean): number {
@@ -90,6 +103,7 @@ export function emptyScore(): Score {
     title: '無題',
     keyFifths: 0,
     time: { beats: 4, beatType: 4 },
+    tempo: 160,
     measures: [[], [], [], []],
   }
 }
