@@ -76,15 +76,21 @@ export function useEditor() {
    * knows where it landed. Moving the cursor first and placing afterwards
    * cannot work: both happen in one handler, so the place would still read the
    * pre-click cursor out of its closure and write to the wrong slot.
+   *
+   * The measure is measured after the write, not before: a replacement changes
+   * the length of an entry that is already counted, so asking whether the new
+   * entry "fits in what is left" is the wrong question for it. Building the
+   * result first and rejecting an overfull measure asks the same question of
+   * both paths.
    */
   const place = useCallback(
     (entry: Entry, at: Cursor): Cursor | null => {
       const entries = score.measures[at.measure] ?? []
       const replacing = at.index < entries.length
-      if (!replacing && !fits(entries, score.time, entry.value, entry.dotted)) return null
       const next = replacing
         ? entries.map((existing, i) => (i === at.index ? entry : existing))
         : [...entries, entry]
+      if (measureRemaining(next, score.time) < 0) return null
       setScore((current) => ({
         ...current,
         measures: current.measures.map((existing, i) => (i === at.measure ? next : existing)),

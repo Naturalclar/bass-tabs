@@ -126,6 +126,37 @@ test('a measure cannot be overfilled past its time signature', async ({ page }) 
   expect(await page.locator('.tab-cell--note').count()).toBe(before)
 })
 
+/**
+ * Rewriting an entry changes the length of something already counted, so the
+ * append-only question ("does this fit in what is left?") answers it wrongly --
+ * the check above passes while a bar quietly grows to seven beats.
+ */
+test('rewriting an entry cannot overfill the measure either', async ({ page }) => {
+  await openEditor(page)
+  await fillFirstMeasure(page, 'E')
+
+  // Step back onto the last quarter and try to make it a whole note.
+  await page.locator('.tab-editor').focus()
+  await page.keyboard.press('ArrowLeft')
+  await page.locator('.chip', { hasText: /^全$/ }).click()
+  await page.locator('.tab-editor').focus()
+  await page.keyboard.press('5')
+
+  await expect(page.getByText('この小節の残り: 0 拍')).toBeVisible()
+  await expect(page.locator('.tab-cell--note')).toHaveCount(4)
+})
+
+test('a click cannot overfill the measure either', async ({ page }) => {
+  await openEditor(page)
+  await fillFirstMeasure(page, 'E')
+
+  // Now that a click writes where it lands (#13), it reaches the same path.
+  await page.locator('.chip', { hasText: /^2分$/ }).click()
+  await page.getByRole('button', { name: '1 小節目 1 番目 G 弦' }).click()
+
+  await expect(page.getByText('この小節の残り: 0 拍')).toBeVisible()
+})
+
 test('an exported score can be loaded back in', async ({ page }, testInfo) => {
   await openEditor(page)
   await fillFirstMeasure(page, 'A')
