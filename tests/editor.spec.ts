@@ -104,15 +104,40 @@ test('clicking a later measure writes into that measure', async ({ page }) => {
   expect(perMeasure).toEqual([1, 0, 1, 0])
 })
 
-test('a measure cannot be overfilled past its time signature', async ({ page }) => {
+test('a full measure stops offering a slot to append to', async ({ page }) => {
   await openEditor(page)
-  await fillFirstMeasure(page, 'E')
+  // Three quarters into 4/4: one beat left, so the append slot is still there.
+  for (const slot of [1, 2, 3]) {
+    await page.getByRole('button', { name: `1 小節目 ${slot} 番目 E 弦` }).click()
+  }
+  await expect(page.getByText('この小節の残り: 1 拍')).toBeVisible()
+  await expect(page.getByRole('button', { name: '1 小節目 4 番目 E 弦' })).toBeVisible()
+
+  await page.getByRole('button', { name: '1 小節目 4 番目 E 弦' }).click()
   await expect(page.getByText('この小節の残り: 0 拍')).toBeVisible()
 
-  // 4/4 is full after four quarters, so a fifth click must not add anything.
-  const before = await page.locator('.tab-cell--note').count()
-  await page.getByRole('button', { name: '1 小節目 5 番目 E 弦' }).click()
-  expect(await page.locator('.tab-cell--note').count()).toBe(before)
+  // Nothing more fits, so the slot that could only refuse is gone.
+  await expect(page.getByRole('button', { name: '1 小節目 5 番目 E 弦' })).toHaveCount(0)
+  await expect(page.locator('.tab-measure').first().locator('.tab-column')).toHaveCount(4)
+  // The following measures still have theirs.
+  await expect(page.getByRole('button', { name: '2 小節目 1 番目 E 弦' })).toBeVisible()
+})
+
+test('the highlight stays on the last note of a full measure', async ({ page }) => {
+  await openEditor(page)
+  await fillFirstMeasure(page, 'E')
+
+  // The cursor sits where the append slot used to be; without a fallback the
+  // grid would show no selection at all, and the arrow keys act on the note
+  // that selection points at.
+  await expect(page.locator('.tab-column--selected')).toHaveCount(1)
+  await expect(
+    page.locator('.tab-measure').first().locator('.tab-column').last(),
+  ).toHaveClass(/tab-column--selected/)
+
+  await page.locator('.tab-editor').focus()
+  await page.keyboard.press('ArrowUp')
+  await expect(page.locator('.tab-cell--note').last()).toHaveText('1')
 })
 
 /**

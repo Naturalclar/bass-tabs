@@ -223,6 +223,7 @@ export default function App() {
           />
           <TabEditor
             measures={editor.score.measures}
+            time={editor.score.time}
             cursor={editor.cursor}
             onPlace={(at, stringNumber) =>
               recordPlacement(editor.putNote(stringNumber, editor.fret, at), null)
