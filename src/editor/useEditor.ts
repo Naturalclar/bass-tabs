@@ -1,29 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  MAX_MEASURES,
-  emptyScore,
-  fits,
-  measureRemaining,
-  sortedFingerings,
-  type Entry,
-  type NoteValue,
-  type Score,
-  type TimeSignature,
-} from './model.ts'
+import { measureRemaining, type Entry, type NoteValue, type Score, type TimeSignature } from './model.ts'
 import { toMusicXml } from './musicxml.ts'
-import {
-  newScoreId,
-  readLibrary,
-  removeScore,
-  writeIndex,
-  writeScore,
-  type ScoreId,
-  type StoredScore,
-} from './storage.ts'
-import { MAX_FRET, STRINGS, restring, transpose } from './tuning.ts'
+import { MAX_FRET, STRINGS } from './tuning.ts'
+import { useLibrary } from './useLibrary.ts'
+import * as edit from './edit.ts'
+import type { Cursor } from './edit.ts'
 
-/** Where the next entry goes: which measure, and how far into it. */
-export type Cursor = { measure: number; index: number }
+export type { Cursor } from './edit.ts'
 
 /**
  * What undo restores. The cursor travels with the score: putting the notes back
@@ -42,76 +25,51 @@ const MAX_HISTORY = 50
  */
 export type CommitKey = string | null
 
-export type EditorState = {
-  score: Score
-  cursor: Cursor
-  value: NoteValue
-  dotted: boolean
-  /** The fret a click on a string lane places, and what digit keys edit. */
-  fret: number
-}
-
-/** A library that always holds at least one score, so there is always one open. */
-function initialLibrary(): { scores: StoredScore[]; currentId: ScoreId } {
-  const stored = readLibrary()
-  if (stored.currentId && stored.scores.length > 0) {
-    return { scores: stored.scores, currentId: stored.currentId }
-  }
-  const first = { id: newScoreId(), score: emptyScore() }
-  return { scores: [first], currentId: first.id }
-}
-
+/**
+ * Editing the open score. The score transformations themselves are the pure
+ * functions in edit.ts; this hook holds what they cannot -- which score is
+ * open (via useLibrary), where the cursor stands, the undo history -- and
+ * feeds their results through `commit()`.
+ */
 export function useEditor() {
-  const [library, setLibrary] = useState(initialLibrary)
-  const { scores, currentId } = library
-  const score = scores.find((entry) => entry.id === currentId)?.score ?? emptyScore()
+  const library = useLibrary()
+  const { score, currentId, setScore } = library
   const [cursor, setCursor] = useState<Cursor>({ measure: 0, index: 0 })
   const [value, setValue] = useState<NoteValue>(4)
   const [dotted, setDotted] = useState(false)
   const [fret, setFret] = useState(0)
   /** The string arrow keys move over and digit keys write to. */
   const [stringNumber, setStringNumber] = useState(STRINGS[STRINGS.length - 1].number)
-  const setScore = useCallback(
-    (next: Score) => {
-      setLibrary((current) => ({
-        ...current,
-        scores: current.scores.map((entry) =>
-          entry.id === current.currentId ? { ...entry, score: next } : entry,
-        ),
-      }))
-    },
-    [],
-  )
   const [past, setPast] = useState<Snapshot[]>([])
   const [future, setFuture] = useState<Snapshot[]>([])
   /** The key of the last commit, for collapsing a run of edits into one step. */
   const lastKey = useRef<CommitKey>(null)
 
-  // Only the score being edited is written on a keystroke. The index changes
-  // when scores are added, removed or switched, so those write it themselves.
+  /**
+   * The one seam between the library and the editing state. Everything above
+   * remembers a position in the open score, so when the open score changes --
+   * a switch, an add, an import, a delete of the open one -- all of it resets
+   * here, and only here. The library's operations carry no resets of their
+   * own, so a new one cannot forget to; and adjusting during render rather
+   * than in an effect keeps a cursor from another score from ever reaching
+   * the DOM.
+   */
+  const [editingId, setEditingId] = useState(currentId)
+  if (editingId !== currentId) {
+    setEditingId(currentId)
+    setCursor({ measure: 0, index: 0 })
+    setPast([])
+    setFuture([])
+  }
+  // The ref part of the same reset. A ref must not be written during render,
+  // and an effect is early enough: it runs before any event that could
+  // commit against the stale key.
   useEffect(() => {
-    writeScore(currentId, score)
-  }, [currentId, score])
+    lastKey.current = null
+  }, [currentId])
 
   const musicXml = useMemo(() => toMusicXml(score), [score])
 
-  /**
-   * Writes one entry at `at`: replacing the entry under it, or appending when
-   * it sits past the end. Whether the write happened decides whether the cursor
-   * advances -- advancing after a rejected append would leave the cursor
-   * pointing into a gap past the end of the measure.
-   *
-   * The target is an argument rather than the current cursor because a click
-   * knows where it landed. Moving the cursor first and placing afterwards
-   * cannot work: both happen in one handler, so the place would still read the
-   * pre-click cursor out of its closure and write to the wrong slot.
-   *
-   * The measure is measured after the write, not before: a replacement changes
-   * the length of an entry that is already counted, so asking whether the new
-   * entry "fits in what is left" is the wrong question for it. Building the
-   * result first and rejecting an overfull measure asks the same question of
-   * both paths.
-   */
   /**
    * The one place the score changes. Everything else describes the next score
    * and hands it here, so history has a single choke point rather than eight.
@@ -135,70 +93,24 @@ export function useEditor() {
   )
 
   /**
-   * Writes `entry` at `at`, carrying on into later measures when it does not
-   * fit there and growing the score when it runs off the end.
+   * Commits a placement, keyed on the slot it landed in -- which only the
+   * placement itself knows -- so the fret digits that follow amend that step.
    *
-   * `keyPrefix` is not the commit key itself: where the entry lands is only
-   * known here, and the key has to name that slot so the fret digits that
-   * follow amend the same undo step.
+   * The target is an argument rather than the current cursor because a click
+   * knows where it landed. Moving the cursor first and placing afterwards
+   * cannot work: both happen in one handler, so the place would still read the
+   * pre-click cursor out of its closure and write to the wrong slot.
    */
   const place = useCallback(
     (entry: Entry, at: Cursor, keyPrefix: string | null = null): Cursor | null => {
-      const measures = score.measures
-      const keyFor = (slot: Cursor): CommitKey =>
-        keyPrefix === null ? null : `${keyPrefix}:${slot.measure}:${slot.index}`
-      const entries = measures[at.measure] ?? []
-      const replacing = at.index < entries.length
-      const written = replacing
-        ? entries.map((existing, i) => (i === at.index ? entry : existing))
-        : [...entries, entry]
-
-      if (measureRemaining(written, score.time) >= 0) {
-        commit(
-          {
-            ...score,
-            measures: measures.map((existing, i) => (i === at.measure ? written : existing)),
-          },
-          { measure: at.measure, index: Math.min(at.index + 1, written.length) },
-          keyFor(at),
-        )
-        return at
-      }
-
-      // It does not fit here. Typing straight through a score means a full bar
-      // has to hand over to the next one rather than swallow the keystroke, so
-      // the entry moves on to the first later measure with room for it. Two
-      // things cannot move: rewriting a slot that already exists, and a value
-      // longer than any bar of this time signature, which has nowhere to go.
-      const alone = [entry]
-      if (replacing || measureRemaining(alone, score.time) < 0) return null
-
-      let target = at.measure + 1
-      while (
-        target < measures.length &&
-        measureRemaining([...(measures[target] ?? []), entry], score.time) < 0
-      ) {
-        target += 1
-      }
-      // Past the last measure the score grows. Only a write does this -- moving
-      // the cursor does not -- so the measure that appears always holds the note
-      // that asked for it, and a score never ends with an empty bar nobody
-      // wrote in.
-      if (target >= MAX_MEASURES) return null
-      const into = [...(measures[target] ?? []), entry]
-      const slot = { measure: target, index: into.length - 1 }
+      const placed = edit.place(score, entry, at)
+      if (!placed) return null
       commit(
-        {
-          ...score,
-          measures:
-            target < measures.length
-              ? measures.map((existing, i) => (i === target ? into : existing))
-              : [...measures, into],
-        },
-        { measure: target, index: into.length },
-        keyFor(slot),
+        placed.score,
+        placed.cursor,
+        keyPrefix === null ? null : `${keyPrefix}:${placed.slot.measure}:${placed.slot.index}`,
       )
-      return slot
+      return placed.slot
     },
     [commit, score],
   )
@@ -214,7 +126,6 @@ export function useEditor() {
       // lane and then typing a fret keeps working on that same string.
       setFret(clamped)
       setStringNumber(targetString)
-      // Keyed on where it lands, so the fret digits that follow amend that step.
       const slot = place(
         { kind: 'note', notes: [{ string: targetString, fret: clamped }], value, dotted },
         at,
@@ -226,111 +137,44 @@ export function useEditor() {
   )
 
   /**
-   * The click's entry point: a lane of an existing column toggles that string
-   * in or out of the beat, which is how a chord is built -- click the second
-   * string of the same column -- and how one note of it is taken out again.
-   * Taking out the last one leaves a rest, not a hole: the beat was played
-   * empty, it did not stop existing, and the rhythm around it must not shift.
-   * Past the written columns it writes a fresh note, same as the keyboard.
+   * The click's entry point: toggles a string in or out of an existing column,
+   * or -- past the written columns -- writes a fresh note, same as the
+   * keyboard.
    */
   const toggleNoteAt = useCallback(
     (at: Cursor, targetString: number): { at: Cursor; string: number } | null => {
-      const entries = score.measures[at.measure] ?? []
-      const entry = entries[at.index]
-      if (!entry || entry.kind === 'rest') return putNote(targetString, fret, at)
-
-      const existing = entry.notes.find((note) => note.string === targetString)
-      const notes = existing
-        ? entry.notes.filter((note) => note.string !== targetString)
-        : sortedFingerings([...entry.notes, { string: targetString, fret }])
-      const next: Entry =
-        notes.length > 0 ? { ...entry, notes } : { kind: 'rest', value: entry.value, dotted: entry.dotted }
-      if (!existing) {
-        setStringNumber(targetString)
-      }
-      commit(
-        {
-          ...score,
-          measures: score.measures.map((measure, i) =>
-            i !== at.measure
-              ? measure
-              : measure.map((current, j) => (j === at.index ? next : current)),
-          ),
-        },
-        { measure: at.measure, index: at.index },
-      )
+      const toggled = edit.toggleString(score, at, targetString, fret)
+      if (!toggled) return putNote(targetString, fret, at)
+      if (toggled.added) setStringNumber(targetString)
+      commit(toggled.score, toggled.cursor)
       // Only an added note wants the fret digits that follow; a removal has
       // nothing for them to amend.
-      return existing ? null : { at, string: targetString }
+      return toggled.added ? { at, string: targetString } : null
     },
     [commit, fret, putNote, score],
   )
 
-  /**
-   * Rewrites the fret of an entry already on the staff, leaving the cursor
-   * alone. Typing a second digit has to edit the note the first digit made,
-   * not write a new one after it.
-   */
+  /** Rewrites the fret of a note already on the staff, leaving the cursor alone. */
   const setFretAt = useCallback(
     (at: Cursor, targetString: number, atFret: number) => {
       const clamped = Math.min(Math.max(atFret, 0), MAX_FRET)
       setFret(clamped)
-      commit(
-        {
-          ...score,
-          measures: score.measures.map((entries, i) =>
-            i !== at.measure
-              ? entries
-              : entries.map((entry, j) =>
-                  j === at.index && entry.kind === 'note'
-                    ? {
-                        ...entry,
-                        notes: entry.notes.map((note) =>
-                          note.string === targetString ? { ...note, fret: clamped } : note,
-                        ),
-                      }
-                    : entry,
-                ),
-          ),
-        },
-        cursor,
-        // Same key the placement used, so the whole run is one undo.
-        `fret:${at.measure}:${at.index}`,
-      )
+      // Same key the placement used, so the whole run is one undo.
+      commit(edit.withFret(score, at, targetString, clamped), cursor, `fret:${at.measure}:${at.index}`)
     },
     [commit, cursor, score],
   )
 
   /**
-   * Appends a run of entries after everything already written, filling the
-   * last used measure and growing from there -- what a video-mode capture
-   * needs: each capture is one commit, so one Ctrl+Z takes back one capture.
-   * Entries past MAX_MEASURES are dropped and counted rather than failing the
-   * whole batch: half a capture on the paper beats none at the very end of a
-   * long score.
+   * Appends a run of entries after everything already written -- what a
+   * video-mode capture needs: each capture is one commit, so one Ctrl+Z takes
+   * back one capture.
    */
   const appendEntries = useCallback(
     (entries: Entry[]): { added: number; dropped: number } => {
-      const measures = score.measures.map((measure) => [...measure])
-      // Trailing empty measures are the append point, not content to keep
-      // after: writing into bar 1 of an untouched score should not leave 3
-      // empty bars in front of the next capture.
-      while (measures.length > 1 && measures[measures.length - 1].length === 0) measures.pop()
-      let added = 0
-      for (const entry of entries) {
-        const last = measures[measures.length - 1]
-        if (measureRemaining([...last, entry], score.time) >= 0) last.push(entry)
-        else if (measures.length < MAX_MEASURES) measures.push([entry])
-        else break
-        added++
-      }
-      if (added > 0) {
-        commit(
-          { ...score, measures },
-          { measure: measures.length - 1, index: measures[measures.length - 1].length },
-        )
-      }
-      return { added, dropped: entries.length - added }
+      const appended = edit.appendRun(score, entries)
+      if (appended.added > 0) commit(appended.score, appended.cursor)
+      return { added: appended.added, dropped: appended.dropped }
     },
     [commit, score],
   )
@@ -343,17 +187,8 @@ export function useEditor() {
   )
 
   const removeAtCursor = useCallback(() => {
-    commit(
-      {
-        ...score,
-        measures: score.measures.map((entries, i) => {
-          if (i !== cursor.measure) return entries
-          const target = Math.min(cursor.index, entries.length - 1)
-          return entries.filter((_, j) => j !== target)
-        }),
-      },
-      { ...cursor, index: Math.max(0, cursor.index - 1) },
-    )
+    const removed = edit.removeAt(score, cursor)
+    commit(removed.score, removed.cursor)
   }, [commit, cursor, score])
 
   const moveCursor = useCallback(
@@ -362,55 +197,22 @@ export function useEditor() {
       // but it does end one: the next digit should start a new fret, not extend
       // the one left behind.
       lastKey.current = null
-      setCursor((c) => {
-        const entries = score.measures[c.measure] ?? []
-        const next = c.index + delta
-        if (next < 0) {
-          if (c.measure === 0) return c
-          const previous = score.measures[c.measure - 1] ?? []
-          return { measure: c.measure - 1, index: previous.length }
-        }
-        if (next > entries.length) {
-          if (c.measure >= score.measures.length - 1) return c
-          return { measure: c.measure + 1, index: 0 }
-        }
-        return { ...c, index: next }
-      })
+      setCursor((c) => edit.stepCursor(score, c, delta))
     },
-    [score.measures],
+    [score],
   )
 
-  /** Jumps a whole measure, landing on its first slot. */
   const moveMeasure = useCallback(
     (delta: number) => {
       lastKey.current = null
-      setCursor((c) => {
-        const measure = Math.min(Math.max(c.measure + delta, 0), score.measures.length - 1)
-        return measure === c.measure ? c : { measure, index: 0 }
-      })
+      setCursor((c) => edit.jumpMeasure(score, c, delta))
     },
-    [score.measures.length],
+    [score],
   )
 
   const setTime = useCallback(
     (time: TimeSignature) => {
-      // Existing entries can overflow a shorter bar; trim rather than silently
-      // writing a measure that does not add up.
-      commit(
-        {
-          ...score,
-          time,
-          measures: score.measures.map((entries) => {
-            const kept: Entry[] = []
-            for (const entry of entries) {
-              if (!fits(kept, time, entry.value, entry.dotted)) break
-              kept.push(entry)
-            }
-            return kept
-          }),
-        },
-        cursor,
-      )
+      commit(edit.withTime(score, time), cursor)
     },
     [commit, cursor, score],
   )
@@ -432,178 +234,27 @@ export function useEditor() {
 
   const setMeasureCount = useCallback(
     (count: number) => {
-      const clamped = Math.min(Math.max(count, 1), MAX_MEASURES)
-      commit(
-        {
-          ...score,
-          measures:
-            clamped <= score.measures.length
-              ? score.measures.slice(0, clamped)
-              : [
-                  ...score.measures,
-                  ...Array.from({ length: clamped - score.measures.length }, (): Entry[] => []),
-                ],
-        },
-        { measure: Math.min(cursor.measure, clamped - 1), index: cursor.index },
-      )
+      const resized = edit.withMeasureCount(score, cursor, count)
+      commit(resized.score, resized.cursor)
     },
     [commit, cursor, score],
   )
 
   /**
-   * Moves to another score. The undo history stays behind: it describes edits
-   * to the score being left, and replaying them onto a different one would put
-   * this score's notes into that score.
-   */
-  const selectScore = useCallback(
-    (id: ScoreId) => {
-      if (id === currentId) return
-      setLibrary((current) =>
-        current.scores.some((entry) => entry.id === id) ? { ...current, currentId: id } : current,
-      )
-      writeIndex(
-        scores.map((entry) => entry.id),
-        id,
-      )
-      setCursor({ measure: 0, index: 0 })
-      setPast([])
-      setFuture([])
-      lastKey.current = null
-    },
-    [currentId, scores],
-  )
-
-  /** Adds an empty score and opens it. The scores already saved stay put. */
-  const addScore = useCallback(() => {
-    const entry = { id: newScoreId(), score: emptyScore() }
-    setLibrary((current) => ({
-      scores: [...current.scores, entry],
-      currentId: entry.id,
-    }))
-    writeScore(entry.id, entry.score)
-    writeIndex([...scores.map((existing) => existing.id), entry.id], entry.id)
-    setCursor({ measure: 0, index: 0 })
-    setPast([])
-    setFuture([])
-    lastKey.current = null
-  }, [scores])
-
-  /**
-   * Adds scores read from a file, and opens the first of them.
-   *
-   * They are always added, never merged over what is already saved: an import
-   * is someone bringing scores in, and quietly replacing the ones they already
-   * had would be the one mistake there is no undo for. New ids are minted so a
-   * file restored twice cannot collide with itself.
-   */
-  const importScores = useCallback(
-    (incoming: Score[]) => {
-      if (incoming.length === 0) return
-      const added = incoming.map((score) => ({ id: newScoreId(), score }))
-      setLibrary((current) => ({
-        scores: [...current.scores, ...added],
-        currentId: added[0].id,
-      }))
-      for (const entry of added) writeScore(entry.id, entry.score)
-      writeIndex(
-        [...scores.map((entry) => entry.id), ...added.map((entry) => entry.id)],
-        added[0].id,
-      )
-      setCursor({ measure: 0, index: 0 })
-      setPast([])
-      setFuture([])
-      lastKey.current = null
-    },
-    [scores],
-  )
-
-  /**
-   * Deletes a score for good -- undo cannot reach it, because the history
-   * describes edits inside a score, not the library around it. The UI asks
-   * first for that reason. Deleting the last one leaves a fresh empty score, so
-   * there is always something open.
-   */
-  const deleteScore = useCallback(
-    (id: ScoreId) => {
-      const remaining = scores.filter((entry) => entry.id !== id)
-      const next =
-        remaining.length > 0 ? remaining : [{ id: newScoreId(), score: emptyScore() }]
-      const nextId = remaining.some((entry) => entry.id === currentId)
-        ? currentId
-        : (next[0]?.id ?? '')
-      setLibrary({ scores: next, currentId: nextId })
-      removeScore(id)
-      if (remaining.length === 0) writeScore(next[0].id, next[0].score)
-      writeIndex(
-        next.map((entry) => entry.id),
-        nextId,
-      )
-      if (nextId !== currentId) {
-        setCursor({ measure: 0, index: 0 })
-        setPast([])
-        setFuture([])
-        lastKey.current = null
-      }
-    },
-    [currentId, scores],
-  )
-
-  /**
-   * The entry the arrow keys act on: the one under the cursor, or -- when the
-   * cursor sits on the empty append slot, which is where it lands right after
-   * writing -- the one just before it. Either way it is the column the grid is
-   * highlighting, so the note that moves is the note that looks selected.
-   */
-  const targetIndex = useCallback((): number | null => {
-    const entries = score.measures[cursor.measure] ?? []
-    if (entries[cursor.index]) return cursor.index
-    if (entries[cursor.index - 1]) return cursor.index - 1
-    return null
-  }, [cursor, score.measures])
-
-  /**
-   * Moves the selected note, either in pitch (`semitones`) or across strings at
-   * the same pitch (`strings`). Rests have no pitch, and a move off the end of
-   * the neck has nowhere to go: both leave the score alone.
-   *
-   * Repeated presses collapse into one undo step, keyed by position, so nudging
-   * a note four semitones is one step back rather than four.
+   * Moves the selected beat in pitch or across strings. Repeated presses
+   * collapse into one undo step, keyed by position, so nudging a note four
+   * semitones is one step back rather than four.
    */
   const moveNote = useCallback(
-    ({ semitones = 0, strings = 0 }: { semitones?: number; strings?: number }) => {
-      const index = targetIndex()
-      if (index === null) return
-      const entries = score.measures[cursor.measure] ?? []
-      const entry = entries[index]
-      if (entry.kind !== 'note') return
-      // The whole beat moves together, or not at all: half a chord shifting
-      // is never what an arrow key meant. A move that would land two notes on
-      // the same string has nowhere coherent to go either.
-      const moved = entry.notes.map((note) =>
-        semitones ? transpose(note, semitones) : restring(note, strings),
-      )
-      if (moved.some((note) => note === null)) return
-      const landed = sortedFingerings(moved as { string: number; fret: number }[])
-      if (new Set(landed.map((note) => note.string)).size !== landed.length) return
-      // The next note follows the string and fret the first one ended on.
-      setStringNumber(landed[0].string)
-      setFret(landed[0].fret)
-      commit(
-        {
-          ...score,
-          measures: score.measures.map((measure, i) =>
-            i !== cursor.measure
-              ? measure
-              : measure.map((existing, j) =>
-                  j === index ? { ...entry, notes: landed } : existing,
-                ),
-          ),
-        },
-        cursor,
-        `move:${cursor.measure}:${index}`,
-      )
+    (move: { semitones?: number; strings?: number }) => {
+      const moved = edit.moveBeat(score, cursor, move)
+      if (!moved) return
+      // The next note follows the string and fret this beat ended on.
+      setStringNumber(moved.landed[0].string)
+      setFret(moved.landed[0].fret)
+      commit(moved.score, cursor, `move:${cursor.measure}:${moved.index}`)
     },
-    [commit, cursor, score, targetIndex],
+    [commit, cursor, score],
   )
 
   const undo = useCallback(() => {
@@ -654,12 +305,12 @@ export function useEditor() {
     setKeyFifths,
     setTitle,
     setMeasureCount,
-    scores,
+    scores: library.scores,
     currentId,
-    selectScore,
-    addScore,
-    deleteScore,
-    importScores,
+    selectScore: library.selectScore,
+    addScore: library.addScore,
+    deleteScore: library.deleteScore,
+    importScores: library.importScores,
     undo,
     redo,
     canUndo: past.length > 0,

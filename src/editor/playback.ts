@@ -50,11 +50,15 @@ export function schedule(score: Score): PlaybackNote[] {
     for (const entry of entries) {
       const duration = ticks(entry.value, entry.dotted)
       if (entry.kind === 'note') {
-        notes.push({
-          midi: midiFor(entry.string, entry.fret),
-          startTicks: at,
-          durationTicks: duration,
-        })
+        // A chord is its fingerings sounding together: one PlaybackNote per
+        // string, all sharing the beat's start and length.
+        for (const fingering of entry.notes) {
+          notes.push({
+            midi: midiFor(fingering.string, fingering.fret),
+            startTicks: at,
+            durationTicks: duration,
+          })
+        }
       }
       at += duration
     }
