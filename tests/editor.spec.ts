@@ -1809,8 +1809,7 @@ test.describe('再生のスケジュール', () => {
 
   const note = (fret: number, value: NoteValue = 4, dotted = false): Entry => ({
     kind: 'note',
-    string: 4,
-    fret,
+    notes: [{ string: 4, fret }],
     value,
     dotted,
   })
@@ -1827,6 +1826,23 @@ test.describe('再生のスケジュール', () => {
     expect(notes).toEqual([
       { midi: 28, startTicks: 0, durationTicks: quarter },
       { midi: 30, startTicks: quarter * 2, durationTicks: quarter },
+    ])
+  })
+
+  test('和音は全部の弦が同じ開始時刻で鳴る', () => {
+    const chord: Entry = {
+      kind: 'note',
+      notes: [
+        { string: 3, fret: 2 }, // A 弦 2f = B1 (MIDI 35)
+        { string: 4, fret: 0 }, // 開放 E = E1 (MIDI 28)
+      ],
+      value: 4,
+      dotted: false,
+    }
+    const notes = schedule(scoreOf([[chord]]))
+    expect(notes).toEqual([
+      { midi: 35, startTicks: 0, durationTicks: quarter },
+      { midi: 28, startTicks: 0, durationTicks: quarter },
     ])
   })
 
