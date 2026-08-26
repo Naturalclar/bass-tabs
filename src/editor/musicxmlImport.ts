@@ -1,5 +1,7 @@
 import {
   MAX_MEASURES,
+  MAX_TEMPO,
+  MIN_TEMPO,
   NOTE_VALUES,
   emptyScore,
   measureRemaining,
@@ -147,12 +149,22 @@ export function fromMusicXml(xml: string): MusicXmlImport {
     return { ok: false, reason: 'overfull' }
   }
 
+  // <sound tempo> is quarter notes per minute -- the same meaning as
+  // score.tempo. A missing or out-of-range value falls back to the default
+  // rather than failing the file: tempo is presentation, not substance.
+  const sound = Number(part.querySelector('sound')?.getAttribute('tempo'))
+  const metronome = Number(text(part, 'metronome per-minute'))
+  const tempoOf = (value: number) =>
+    Number.isInteger(value) && value >= MIN_TEMPO && value <= MAX_TEMPO ? value : null
+  const tempo = tempoOf(sound) ?? tempoOf(metronome) ?? base.tempo
+
   return {
     ok: true,
     score: {
       title: text(document, 'work-title') ?? base.title,
       keyFifths: fifths ?? base.keyFifths,
       time,
+      tempo,
       measures,
     },
   }

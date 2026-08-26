@@ -1,4 +1,13 @@
-import { MAX_MEASURES, NOTE_VALUES, type Entry, type Score, type TimeSignature } from './model.ts'
+import {
+  MAX_MEASURES,
+  MAX_TEMPO,
+  MIN_TEMPO,
+  NOTE_VALUES,
+  emptyScore,
+  type Entry,
+  type Score,
+  type TimeSignature,
+} from './model.ts'
 import { MAX_FRET, STRINGS } from './tuning.ts'
 
 /**
@@ -36,7 +45,7 @@ const SCORE_KEY_PREFIX = 'bass-tabs:score:'
  * changes in a way the validator below would still accept -- a renamed field
  * with a compatible type, a changed unit, a changed meaning.
  */
-const STORAGE_VERSION = 3
+const STORAGE_VERSION = 4
 
 const BEAT_TYPES = [1, 2, 4, 8, 16]
 
@@ -86,6 +95,14 @@ export function isScore(value: unknown): value is Score {
   if (!isRecord(value)) return false
   if (typeof value.title !== 'string') return false
   if (typeof value.keyFifths !== 'number' || !Number.isInteger(value.keyFifths)) return false
+  if (
+    typeof value.tempo !== 'number' ||
+    !Number.isInteger(value.tempo) ||
+    value.tempo < MIN_TEMPO ||
+    value.tempo > MAX_TEMPO
+  ) {
+    return false
+  }
   if (!isTimeSignature(value.time)) return false
   if (!Array.isArray(value.measures)) return false
   if (value.measures.length < 1 || value.measures.length > MAX_MEASURES) return false
@@ -151,15 +168,20 @@ function fromVersion2(value: unknown): unknown {
   }
 }
 
+/** Version 3 had no tempo; the default fills in, same style as fromVersion2. */
+function fromVersion3(value: unknown): unknown {
+  if (!isRecord(value)) return value
+  return { ...value, tempo: emptyScore().tempo }
+}
+
 function readScore(id: ScoreId): Score | null {
   const parsed = read(SCORE_KEY_PREFIX + id)
   if (!isRecord(parsed)) return null
-  if (parsed.version === 2) {
-    const lifted = fromVersion2(parsed.score)
-    return isScore(lifted) ? lifted : null
-  }
-  if (parsed.version !== STORAGE_VERSION) return null
-  return isScore(parsed.score) ? parsed.score : null
+  let lifted = parsed.score
+  if (parsed.version === 2) lifted = fromVersion3(fromVersion2(lifted))
+  else if (parsed.version === 3) lifted = fromVersion3(lifted)
+  else if (parsed.version !== STORAGE_VERSION) return null
+  return isScore(lifted) ? lifted : null
 }
 
 /**
@@ -172,7 +194,12 @@ export function readLibrary(): Library {
   const parsed = read(INDEX_KEY)
   // The index's own shape has not changed since version 2, and it is the
   // door to the migratable scores: refusing it would orphan them all.
-  if (!isRecord(parsed) || (parsed.version !== STORAGE_VERSION && parsed.version !== 2)) {
+  if (
+    !isRecord(parsed) ||
+    typeof parsed.version !== 'number' ||
+    parsed.version < 2 ||
+    parsed.version > STORAGE_VERSION
+  ) {
     return { scores: [], currentId: null }
   }
   const ids = Array.isArray(parsed.ids) ? parsed.ids.filter((id) => typeof id === 'string') : []
