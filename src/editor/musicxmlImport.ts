@@ -1,4 +1,12 @@
-import { NOTE_VALUES, emptyScore, type Entry, type NoteValue, type Score } from './model.ts'
+import {
+  MAX_MEASURES,
+  NOTE_VALUES,
+  emptyScore,
+  measureRemaining,
+  type Entry,
+  type NoteValue,
+  type Score,
+} from './model.ts'
 import { MAX_FRET, STRINGS } from './tuning.ts'
 
 /**
@@ -27,7 +35,7 @@ const BEAT_TYPES = [1, 2, 4, 8, 16]
 
 export type MusicXmlImport =
   | { ok: true; score: Score }
-  | { ok: false; reason: 'unreadable' | 'no-tab' }
+  | { ok: false; reason: 'unreadable' | 'no-tab' | 'unsupported' | 'too-long' | 'overfull' }
 
 function text(parent: ParentNode | null, selector: string): string | null {
   return parent?.querySelector(selector)?.textContent?.trim() ?? null
@@ -89,22 +97,40 @@ export function fromMusicXml(xml: string): MusicXmlImport {
     for (const note of measure.querySelectorAll('note')) {
       // Every event is written on both staves; reading one keeps each once.
       if (text(note, 'staff') !== staff) continue
+      // Chords, ties (either spelling) and grace notes have no representation
+      // in the model.
+      // Dropping the markup and keeping the notes would import each chord
+      // tone as its own beat and each tied pair as two attacks -- a score
+      // that looks like the original but is not -- so the file is refused,
+      // which is what the contract at the top of this file promises.
+      if (note.querySelector('chord, tie, tied, grace')) return { ok: false, reason: 'unsupported' }
       const entry = entryOf(note)
       if (entry) entries.push(entry)
     }
     measures.push(entries)
   }
   if (measures.length === 0) return { ok: false, reason: 'unreadable' }
+  // The same limits the storage validator enforces on reload. Anything let
+  // through here would save, show "imported", and then vanish on the next
+  // visit when `isScore` refuses to read it back.
+  if (measures.length > MAX_MEASURES) return { ok: false, reason: 'too-long' }
+
+  const time = {
+    beats: beats && beats >= 1 && beats <= 32 ? beats : base.time.beats,
+    beatType: beatType && BEAT_TYPES.includes(beatType) ? beatType : base.time.beatType,
+  }
+  // A bar holding more than the time signature allows is a state the editor
+  // itself refuses to create, so nothing downstream is prepared for it.
+  if (measures.some((entries) => measureRemaining(entries, time) < 0)) {
+    return { ok: false, reason: 'overfull' }
+  }
 
   return {
     ok: true,
     score: {
       title: text(document, 'work-title') ?? base.title,
       keyFifths: fifths ?? base.keyFifths,
-      time: {
-        beats: beats && beats >= 1 && beats <= 32 ? beats : base.time.beats,
-        beatType: beatType && BEAT_TYPES.includes(beatType) ? beatType : base.time.beatType,
-      },
+      time,
       measures,
     },
   }
