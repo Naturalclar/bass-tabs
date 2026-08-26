@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   MAX_MEASURES,
   emptyScore,
@@ -15,6 +15,23 @@ import { MAX_FRET, STRINGS } from './tuning.ts'
 
 /** Where the next entry goes: which measure, and how far into it. */
 export type Cursor = { measure: number; index: number }
+
+/**
+ * What undo restores. The cursor travels with the score: putting the notes back
+ * but leaving the cursor wherever it drifted to would send the next keystroke
+ * somewhere the person is not looking.
+ */
+type Snapshot = { score: Score; cursor: Cursor }
+
+/** How many steps back you can go. Deep enough to undo a wrong turn, not a session. */
+const MAX_HISTORY = 50
+
+/**
+ * Names a run of edits that undo should treat as one step. Consecutive commits
+ * carrying the same key collapse into the first: typing a title is one undo,
+ * not one per letter, and "1" then "2" for the 12th fret is one undo, not two.
+ */
+export type CommitKey = string | null
 
 export type EditorState = {
   score: Score
@@ -33,6 +50,10 @@ export function useEditor() {
   const [fret, setFret] = useState(0)
   /** The string arrow keys move over and digit keys write to. */
   const [stringNumber, setStringNumber] = useState(STRINGS[STRINGS.length - 1].number)
+  const [past, setPast] = useState<Snapshot[]>([])
+  const [future, setFuture] = useState<Snapshot[]>([])
+  /** The key of the last commit, for collapsing a run of edits into one step. */
+  const lastKey = useRef<CommitKey>(null)
 
   useEffect(() => {
     writeStoredScore(score)
@@ -57,22 +78,47 @@ export function useEditor() {
    * result first and rejecting an overfull measure asks the same question of
    * both paths.
    */
+  /**
+   * The one place the score changes. Everything else describes the next score
+   * and hands it here, so history has a single choke point rather than eight.
+   *
+   * Passing the same `key` as the previous commit extends that step instead of
+   * adding one, which is how a run of keystrokes stays a single undo.
+   */
+  const commit = useCallback(
+    (next: Score, nextCursor: Cursor, key: CommitKey = null) => {
+      const continuing = key !== null && key === lastKey.current
+      if (!continuing) {
+        setPast((entries) => [...entries, { score, cursor }].slice(-MAX_HISTORY))
+      }
+      lastKey.current = key
+      // A new edit is a new branch: whatever was undone is no longer reachable.
+      setFuture([])
+      setScore(next)
+      setCursor(nextCursor)
+    },
+    [cursor, score],
+  )
+
   const place = useCallback(
-    (entry: Entry, at: Cursor): Cursor | null => {
+    (entry: Entry, at: Cursor, key: CommitKey = null): Cursor | null => {
       const entries = score.measures[at.measure] ?? []
       const replacing = at.index < entries.length
       const next = replacing
         ? entries.map((existing, i) => (i === at.index ? entry : existing))
         : [...entries, entry]
       if (measureRemaining(next, score.time) < 0) return null
-      setScore((current) => ({
-        ...current,
-        measures: current.measures.map((existing, i) => (i === at.measure ? next : existing)),
-      }))
-      setCursor({ measure: at.measure, index: Math.min(at.index + 1, next.length) })
+      commit(
+        {
+          ...score,
+          measures: score.measures.map((existing, i) => (i === at.measure ? next : existing)),
+        },
+        { measure: at.measure, index: Math.min(at.index + 1, next.length) },
+        key,
+      )
       return at
     },
-    [score],
+    [commit, score],
   )
 
   const putNote = useCallback(
@@ -82,7 +128,12 @@ export function useEditor() {
       // lane and then typing a fret keeps working on that same string.
       setFret(clamped)
       setStringNumber(targetString)
-      return place({ kind: 'note', string: targetString, fret: clamped, value, dotted }, at)
+      // Keyed by position: the fret digits that follow amend this same step.
+      return place(
+        { kind: 'note', string: targetString, fret: clamped, value, dotted },
+        at,
+        `fret:${at.measure}:${at.index}`,
+      )
     },
     [cursor, dotted, place, value],
   )
@@ -92,20 +143,28 @@ export function useEditor() {
    * alone. Typing a second digit has to edit the note the first digit made,
    * not write a new one after it.
    */
-  const setFretAt = useCallback((at: Cursor, atFret: number) => {
-    const clamped = Math.min(Math.max(atFret, 0), MAX_FRET)
-    setFret(clamped)
-    setScore((current) => ({
-      ...current,
-      measures: current.measures.map((entries, i) =>
-        i !== at.measure
-          ? entries
-          : entries.map((entry, j) =>
-              j === at.index && entry.kind === 'note' ? { ...entry, fret: clamped } : entry,
-            ),
-      ),
-    }))
-  }, [])
+  const setFretAt = useCallback(
+    (at: Cursor, atFret: number) => {
+      const clamped = Math.min(Math.max(atFret, 0), MAX_FRET)
+      setFret(clamped)
+      commit(
+        {
+          ...score,
+          measures: score.measures.map((entries, i) =>
+            i !== at.measure
+              ? entries
+              : entries.map((entry, j) =>
+                  j === at.index && entry.kind === 'note' ? { ...entry, fret: clamped } : entry,
+                ),
+          ),
+        },
+        cursor,
+        // Same key the placement used, so the whole run is one undo.
+        `fret:${at.measure}:${at.index}`,
+      )
+    },
+    [commit, cursor, score],
+  )
 
   const putRest = useCallback(
     (at: Cursor = cursor) => {
@@ -115,19 +174,25 @@ export function useEditor() {
   )
 
   const removeAtCursor = useCallback(() => {
-    setScore((current) => ({
-      ...current,
-      measures: current.measures.map((entries, i) => {
-        if (i !== cursor.measure) return entries
-        const target = Math.min(cursor.index, entries.length - 1)
-        return entries.filter((_, j) => j !== target)
-      }),
-    }))
-    setCursor((c) => ({ ...c, index: Math.max(0, c.index - 1) }))
-  }, [cursor])
+    commit(
+      {
+        ...score,
+        measures: score.measures.map((entries, i) => {
+          if (i !== cursor.measure) return entries
+          const target = Math.min(cursor.index, entries.length - 1)
+          return entries.filter((_, j) => j !== target)
+        }),
+      },
+      { ...cursor, index: Math.max(0, cursor.index - 1) },
+    )
+  }, [commit, cursor, score])
 
   const moveCursor = useCallback(
     (delta: number) => {
+      // Moving is not an edit, so it neither records history nor ends a run --
+      // but it does end one: the next digit should start a new fret, not extend
+      // the one left behind.
+      lastKey.current = null
       setCursor((c) => {
         const entries = score.measures[c.measure] ?? []
         const next = c.index + delta
@@ -146,50 +211,89 @@ export function useEditor() {
     [score.measures],
   )
 
-  const setTime = useCallback((time: TimeSignature) => {
-    // Existing entries can overflow a shorter bar; trim rather than silently
-    // writing a measure that does not add up.
-    setScore((current) => ({
-      ...current,
-      time,
-      measures: current.measures.map((entries) => {
-        const kept: Entry[] = []
-        for (const entry of entries) {
-          if (!fits(kept, time, entry.value, entry.dotted)) break
-          kept.push(entry)
-        }
-        return kept
-      }),
-    }))
-  }, [])
+  const setTime = useCallback(
+    (time: TimeSignature) => {
+      // Existing entries can overflow a shorter bar; trim rather than silently
+      // writing a measure that does not add up.
+      commit(
+        {
+          ...score,
+          time,
+          measures: score.measures.map((entries) => {
+            const kept: Entry[] = []
+            for (const entry of entries) {
+              if (!fits(kept, time, entry.value, entry.dotted)) break
+              kept.push(entry)
+            }
+            return kept
+          }),
+        },
+        cursor,
+      )
+    },
+    [commit, cursor, score],
+  )
 
-  const setKeyFifths = useCallback((keyFifths: number) => {
-    setScore((current) => ({ ...current, keyFifths }))
-  }, [])
+  const setKeyFifths = useCallback(
+    (keyFifths: number) => {
+      commit({ ...score, keyFifths }, cursor)
+    },
+    [commit, cursor, score],
+  )
 
-  const setTitle = useCallback((title: string) => {
-    setScore((current) => ({ ...current, title }))
-  }, [])
+  const setTitle = useCallback(
+    (title: string) => {
+      // One key for the whole field, so typing a name is a single undo.
+      commit({ ...score, title }, cursor, 'title')
+    },
+    [commit, cursor, score],
+  )
 
-  const setMeasureCount = useCallback((count: number) => {
-    const clamped = Math.min(Math.max(count, 1), MAX_MEASURES)
-    setScore((current) => ({
-      ...current,
-      measures:
-        clamped <= current.measures.length
-          ? current.measures.slice(0, clamped)
-          : [
-              ...current.measures,
-              ...Array.from({ length: clamped - current.measures.length }, (): Entry[] => []),
-            ],
-    }))
-    setCursor((c) => ({ measure: Math.min(c.measure, clamped - 1), index: c.index }))
-  }, [])
+  const setMeasureCount = useCallback(
+    (count: number) => {
+      const clamped = Math.min(Math.max(count, 1), MAX_MEASURES)
+      commit(
+        {
+          ...score,
+          measures:
+            clamped <= score.measures.length
+              ? score.measures.slice(0, clamped)
+              : [
+                  ...score.measures,
+                  ...Array.from({ length: clamped - score.measures.length }, (): Entry[] => []),
+                ],
+        },
+        { measure: Math.min(cursor.measure, clamped - 1), index: cursor.index },
+      )
+    },
+    [commit, cursor, score],
+  )
 
   const reset = useCallback(() => {
-    setScore(emptyScore())
-    setCursor({ measure: 0, index: 0 })
-  }, [])
+    // Undoable on purpose: 新規 throws away everything, and mis-clicking it is
+    // exactly the situation undo exists for.
+    commit(emptyScore(), { measure: 0, index: 0 })
+  }, [commit])
+
+  const undo = useCallback(() => {
+    const previous = past.at(-1)
+    if (!previous) return
+    setPast((entries) => entries.slice(0, -1))
+    setFuture((entries) => [...entries, { score, cursor }])
+    setScore(previous.score)
+    setCursor(previous.cursor)
+    lastKey.current = null
+  }, [cursor, past, score])
+
+  const redo = useCallback(() => {
+    const next = future.at(-1)
+    if (!next) return
+    setFuture((entries) => entries.slice(0, -1))
+    setPast((entries) => [...entries, { score, cursor }].slice(-MAX_HISTORY))
+    setScore(next.score)
+    setCursor(next.cursor)
+    lastKey.current = null
+  }, [cursor, future, score])
 
   const remaining = measureRemaining(score.measures[cursor.measure] ?? [], score.time)
 
@@ -216,5 +320,9 @@ export function useEditor() {
     setTitle,
     setMeasureCount,
     reset,
+    undo,
+    redo,
+    canUndo: past.length > 0,
+    canRedo: future.length > 0,
   }
 }
