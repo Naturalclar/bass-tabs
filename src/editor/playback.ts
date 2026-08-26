@@ -41,8 +41,8 @@ export function schedule(score: Score): PlaybackNote[] {
     for (const entry of entries) {
       const duration = ticks(entry.value, entry.dotted)
       if (entry.kind === 'note') {
-        // A chord is several fingerings on one beat: same start, same length,
-        // one PlaybackNote each, so they sound together.
+        // A chord is its fingerings sounding together: one PlaybackNote per
+        // string, all sharing the beat's start and length.
         for (const fingering of entry.notes) {
           notes.push({
             midi: midiFor(fingering.string, fingering.fret),

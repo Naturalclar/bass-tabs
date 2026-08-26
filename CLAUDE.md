@@ -87,10 +87,21 @@ Arrow-key moves act on the whole chord or not at all. `STORAGE_VERSION` is 3; ve
 (single-note shape) is lifted in place by `fromVersion2` rather than discarded, because
 people already had scores saved.
 
+Editing is split in three. `edit.ts` holds the score transformations as pure functions (`Score`
+in, `Score` out; null means "this edit has nowhere to go") — tested directly in
+`tests/editor.spec.ts`, the same way playback's `schedule()` is. `useLibrary.ts` owns which
+scores exist, which is open, and the localStorage writes. `useEditor.ts` connects the two:
+cursor, undo history, and `commit()`.
+
 Every change to the score goes through `commit()` in `useEditor`, which is also where undo records
 its snapshots — so a new mutation must call `commit()` rather than `setScore` directly, or it will
 be invisible to undo. Passing the same `CommitKey` as the previous commit extends that step instead
 of adding one; that is how a typed title or a two-digit fret stays a single undo.
+
+When the open score changes — a switch, an add, an import, a delete of the open one — everything
+in `useEditor` that remembers a position in it (cursor, history, commit key) resets in one place,
+keyed on `currentId`. Library operations deliberately carry no resets of their own; a new one
+cannot forget to.
 
 `src/editor/tabImage.ts` + `imageImport.ts` read a screenshot of a tab into a `Score`:
 pixel analysis (line detection, glyph clustering — pure, testable) in the former, OCR
@@ -126,7 +137,9 @@ shape the app cannot read fails on *every* reload with no way back from the UI. 
 way the validator would still accept (a renamed field, a changed unit) and bump `STORAGE_VERSION`.
 
 Anything that remembers a position in the score — the digit run in `App.tsx`, the undo history —
-has to be cleared when the open score changes, or it will address the score that was left.
+has to be cleared when the open score changes, or it will address the score that was left. The
+editor's own state does this by itself (the `currentId` seam above); the digit run in `App.tsx`
+still clears by hand at every call site.
 
 The notation staff is written an octave above sounding pitch, as bass parts are. That shift lives
 only in `musicxml.ts` (`WRITTEN_OCTAVE_SHIFT`) — `tuning.ts` stays at sounding pitch, which is what
