@@ -11,6 +11,18 @@ import { STRINGS, midiFor, pitchFor, staffLine } from './tuning.ts'
  * re-verifying how OSMD lays it out, so don't.
  */
 
+/**
+ * Bass is written an octave above where it sounds, and this file follows that.
+ * Written at pitch, the open E string sits three ledger lines below the bass
+ * staff and everything low is unreadable -- measured on the two-page sample,
+ * writing at pitch draws 201 ledger-line elements where writing up draws 10.
+ *
+ * The shift lives here and nowhere else. `tuning.ts` stays at sounding pitch,
+ * because that is what the fret arithmetic and MIDI input are about; only the
+ * moment of writing MusicXML moves.
+ */
+const WRITTEN_OCTAVE_SHIFT = 12
+
 const TYPE_NAMES: Record<NoteValue, string> = {
   1: 'whole',
   2: 'half',
@@ -53,7 +65,10 @@ function noteXml(entry: Entry, staff: 1 | 2, keyFifths: number): string {
     entry.kind === 'rest'
       ? '        <rest/>\n'
       : (() => {
-          const { step, alter, octave } = pitchFor(midiFor(entry.string, entry.fret), keyFifths)
+          const { step, alter, octave } = pitchFor(
+            midiFor(entry.string, entry.fret) + WRITTEN_OCTAVE_SHIFT,
+            keyFifths,
+          )
           return (
             '        <pitch>\n' +
             `          <step>${step}</step>\n` +
@@ -89,7 +104,7 @@ function attributesXml(score: Score): string {
       (s) =>
         `          <staff-tuning line="${staffLine(s.number)}">` +
         `<tuning-step>${s.step}</tuning-step>` +
-        `<tuning-octave>${s.octave}</tuning-octave></staff-tuning>\n`,
+        `<tuning-octave>${s.octave + 1}</tuning-octave></staff-tuning>\n`,
     )
     .join('')
 
@@ -100,6 +115,13 @@ function attributesXml(score: Score): string {
     `        <time><beats>${score.time.beats}</beats>` +
     `<beat-type>${score.time.beatType}</beat-type></time>\n` +
     '        <staves>2</staves>\n' +
+    // Says the part sounds an octave below what is written, so the file states
+    // the real pitch even though the notes are written up. OSMD ignores this
+    // for display (verified), which is what makes the two compatible.
+    '        <transpose>\n' +
+    '          <chromatic>0</chromatic>\n' +
+    '          <octave-change>-1</octave-change>\n' +
+    '        </transpose>\n' +
     '        <clef number="1"><sign>F</sign><line>4</line></clef>\n' +
     '        <clef number="2"><sign>TAB</sign><line>5</line></clef>\n' +
     '        <staff-details number="2" print-object="yes">\n' +
