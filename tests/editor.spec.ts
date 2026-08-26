@@ -175,6 +175,100 @@ test('a click cannot overfill the measure either', async ({ page }) => {
 })
 
 /**
+ * A bar that is full has to hand the keystroke on rather than swallow it:
+ * playing a phrase in is one run of keys, and stopping dead at a bar line --
+ * with no message and nothing written -- reads as the editor being broken.
+ */
+test.describe('小節をまたぐ入力', () => {
+  const perBar = (page: Page) =>
+    page
+      .locator('.tab-measure')
+      .evaluateAll((bars) =>
+        bars.map((bar) => [...bar.querySelectorAll('.tab-cell--note')].map((c) => c.textContent)),
+      )
+
+  async function setBars(page: Page, count: number) {
+    const field = page.getByLabel('小節数')
+    await field.click()
+    await field.press('ControlOrMeta+a')
+    await field.pressSequentially(String(count), { delay: 120 })
+    await field.blur()
+    await expect(page.locator('.tab-measure')).toHaveCount(count)
+  }
+
+  test('埋まった小節の続きは次の小節に入る', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    for (let i = 0; i < 4; i++) await page.keyboard.press('3')
+    expect((await perBar(page))[0]).toEqual(['3', '3', '3', '3'])
+
+    await page.keyboard.press('1')
+    await page.keyboard.press('2')
+
+    // The two digits are still one fret, and they are one fret in the next bar.
+    expect((await perBar(page)).slice(0, 2)).toEqual([['3', '3', '3', '3'], ['12']])
+  })
+
+  test('最後の小節を超えると小節が増え、取り消しは 1 手で戻る', async ({ page }) => {
+    await openEditor(page)
+    await setBars(page, 1)
+    await page.locator('.tab-editor').focus()
+    for (let i = 0; i < 4; i++) await page.keyboard.press('3')
+    expect(await perBar(page)).toEqual([['3', '3', '3', '3']])
+
+    await page.keyboard.press('5')
+    // The bar that appears holds the note that asked for it -- growing never
+    // leaves an empty bar at the end for the user to clean up.
+    expect(await perBar(page)).toEqual([['3', '3', '3', '3'], ['5']])
+
+    await page.keyboard.press('ControlOrMeta+z')
+    expect(await perBar(page)).toEqual([['3', '3', '3', '3']])
+  })
+
+  test('カーソル移動だけでは小節は増えない', async ({ page }) => {
+    await openEditor(page)
+    await setBars(page, 1)
+    await page.locator('.tab-editor').focus()
+    for (let i = 0; i < 4; i++) await page.keyboard.press('3')
+
+    for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowRight')
+
+    expect(await perBar(page)).toEqual([['3', '3', '3', '3']])
+  })
+
+  test('上限まで来たら止まる', async ({ page }) => {
+    await openEditor(page)
+    await setBars(page, 64)
+    await page.getByRole('button', { name: '64 小節目 1 番目 E 弦' }).click()
+    for (const key of ['3', '3', '3', '5']) await page.keyboard.press(key)
+    const filled = await perBar(page)
+    expect(filled).toHaveLength(64)
+    expect(filled[63]).toHaveLength(4)
+
+    // The last bar is full and there is nowhere left to grow into.
+    await page.keyboard.press('7')
+    const after = await perBar(page)
+    expect(after).toHaveLength(64)
+    expect(after[63]).toEqual(filled[63])
+  })
+
+  test('増えた小節も同じ印刷経路に乗る', async ({ page }) => {
+    await openEditor(page)
+    await setBars(page, 1)
+    await page.locator('.tab-editor').focus()
+    for (let i = 0; i < 5; i++) await page.keyboard.press('3')
+    await expect(page.locator('.tab-measure')).toHaveCount(2)
+
+    await expect(page.locator('svg.score-page')).toHaveCount(1)
+    const pdf = await page.pdf({ preferCSSPageSize: true })
+    expect(pdfPageCount(pdf)).toBe(1)
+    const size = pdfPageSizeMm(pdf)
+    expect(size.width).toBeCloseTo(210, 0)
+    expect(size.height).toBeCloseTo(297, 0)
+  })
+})
+
+/**
  * The saved score is the one input nothing type-checks: it was written by
  * whatever version of the code ran last. Because it is persisted, a shape the
  * app cannot read does not fail once -- it fails on every reload, and the 新規

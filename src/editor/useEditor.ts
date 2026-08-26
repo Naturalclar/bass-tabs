@@ -133,23 +133,71 @@ export function useEditor() {
     [cursor, score, setScore],
   )
 
+  /**
+   * Writes `entry` at `at`, carrying on into later measures when it does not
+   * fit there and growing the score when it runs off the end.
+   *
+   * `keyPrefix` is not the commit key itself: where the entry lands is only
+   * known here, and the key has to name that slot so the fret digits that
+   * follow amend the same undo step.
+   */
   const place = useCallback(
-    (entry: Entry, at: Cursor, key: CommitKey = null): Cursor | null => {
-      const entries = score.measures[at.measure] ?? []
+    (entry: Entry, at: Cursor, keyPrefix: string | null = null): Cursor | null => {
+      const measures = score.measures
+      const keyFor = (slot: Cursor): CommitKey =>
+        keyPrefix === null ? null : `${keyPrefix}:${slot.measure}:${slot.index}`
+      const entries = measures[at.measure] ?? []
       const replacing = at.index < entries.length
-      const next = replacing
+      const written = replacing
         ? entries.map((existing, i) => (i === at.index ? entry : existing))
         : [...entries, entry]
-      if (measureRemaining(next, score.time) < 0) return null
+
+      if (measureRemaining(written, score.time) >= 0) {
+        commit(
+          {
+            ...score,
+            measures: measures.map((existing, i) => (i === at.measure ? written : existing)),
+          },
+          { measure: at.measure, index: Math.min(at.index + 1, written.length) },
+          keyFor(at),
+        )
+        return at
+      }
+
+      // It does not fit here. Typing straight through a score means a full bar
+      // has to hand over to the next one rather than swallow the keystroke, so
+      // the entry moves on to the first later measure with room for it. Two
+      // things cannot move: rewriting a slot that already exists, and a value
+      // longer than any bar of this time signature, which has nowhere to go.
+      const alone = [entry]
+      if (replacing || measureRemaining(alone, score.time) < 0) return null
+
+      let target = at.measure + 1
+      while (
+        target < measures.length &&
+        measureRemaining([...(measures[target] ?? []), entry], score.time) < 0
+      ) {
+        target += 1
+      }
+      // Past the last measure the score grows. Only a write does this -- moving
+      // the cursor does not -- so the measure that appears always holds the note
+      // that asked for it, and a score never ends with an empty bar nobody
+      // wrote in.
+      if (target >= MAX_MEASURES) return null
+      const into = [...(measures[target] ?? []), entry]
+      const slot = { measure: target, index: into.length - 1 }
       commit(
         {
           ...score,
-          measures: score.measures.map((existing, i) => (i === at.measure ? next : existing)),
+          measures:
+            target < measures.length
+              ? measures.map((existing, i) => (i === target ? into : existing))
+              : [...measures, into],
         },
-        { measure: at.measure, index: Math.min(at.index + 1, next.length) },
-        key,
+        { measure: target, index: into.length },
+        keyFor(slot),
       )
-      return at
+      return slot
     },
     [commit, score],
   )
@@ -161,12 +209,8 @@ export function useEditor() {
       // lane and then typing a fret keeps working on that same string.
       setFret(clamped)
       setStringNumber(targetString)
-      // Keyed by position: the fret digits that follow amend this same step.
-      return place(
-        { kind: 'note', string: targetString, fret: clamped, value, dotted },
-        at,
-        `fret:${at.measure}:${at.index}`,
-      )
+      // Keyed on where it lands, so the fret digits that follow amend that step.
+      return place({ kind: 'note', string: targetString, fret: clamped, value, dotted }, at, 'fret')
     },
     [cursor, dotted, place, value],
   )
