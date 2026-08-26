@@ -86,9 +86,9 @@ OSMD の依存の `gl`（headless-gl、ネイティブビルド）がビルド�
 | `pnpm dev` | 開発サーバ |
 | `pnpm build` | `typecheck` してから本番ビルド |
 | `pnpm preview` | ビルド結果の確認 |
-| `pnpm lint` | oxlint |
+| `pnpm lint` | oxlint（警告も失敗扱い） |
 | `pnpm typecheck` | `tsc -b --noEmit` |
-| `pnpm check` | lint + typecheck |
+| `pnpm check` | lint + typecheck。CI はこれに加えてビルドと `pnpm test:print` も走らせる |
 | `pnpm test:print` | 印刷リグレッションチェック（ビルド → 配信 → PDF 出力まで実行） |
 
 ### なぜ oxlint と tsc の両方なのか
@@ -97,6 +97,11 @@ oxlint は速度を理由に選んでいるが、型情報を使う検査（type
 完全にはカバーしない。その層は `tsc` で埋める。**片方だけでは足りない**という実例が実際に出た:
 `backend: BackendType.SVG` は oxlint を素通りしたが `tsc` が拒否した（OSMD 2.1.2 の `backend` は
 `string` 型で、数値 enum の `BackendType` は代入できない。正しくは `backend: 'svg'`）。
+
+oxlint は `--deny-warnings` で動かしている。既定では警告があっても終了コードが 0 になるので、
+`warn` に設定したルールが CI を落とせない。実際、レンダー中の ref 参照と effect 内の同期的な
+`setState` の警告が出たまま CI が green だったことがある。手元と CI で同じコマンドを使うため、
+別スクリプトを足すのではなく `pnpm lint` 自体を厳しくしてある。
 
 ## 印刷リグレッションチェック
 

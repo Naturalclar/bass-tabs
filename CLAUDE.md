@@ -19,12 +19,15 @@ building it.
 
 ```sh
 pnpm dev        # dev server
-pnpm check      # lint + typecheck, same as CI
+pnpm check      # lint + typecheck
 pnpm typecheck  # tsc -b --noEmit
 pnpm lint       # oxlint
 pnpm build      # typecheck, then production build
 pnpm test:print # print regression check (builds, serves, prints to PDF)
 ```
+
+CI runs `lint`, `typecheck` and a build in one job and `test:print` in another, so `pnpm check`
+passing is not the same as CI passing — the build and the print checks are not in it.
 
 The only tests are the print checks in `tests/` — `print.spec.ts` for imported files and
 `editor.spec.ts` for scores written in the app; there are no unit tests. `pnpm test:print`
