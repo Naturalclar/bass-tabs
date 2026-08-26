@@ -130,15 +130,23 @@ export default function App() {
         event.preventDefault()
         // Frets run past 9, so a digit typed right after another extends the
         // note it just wrote -- "1" then "2" means fret 12, not 1 followed by 2.
+        // It only extends while the two digits together are a fret that exists:
+        // "3" then "3" is not fret 33, and clamping it to the top fret both lost
+        // the note that was there and swallowed the keystroke, so the second
+        // digit starts the next note instead. A run already sitting on "0" is
+        // the same case -- no fret is written "05" -- while an empty run is not,
+        // since that is a click's note waiting for its first digit.
+        const base = previous?.digits ?? ''
         if (previous && now - previous.time < FRET_KEY_WINDOW_MS) {
-          const digits = (previous.digits ?? '') + key
-          const fret = Math.min(Number(digits), MAX_FRET)
-          editor.setFretAt(previous.at, fret)
-          lastFret.current = { at: previous.at, digits: String(fret), time: now }
-          return
+          const digits = base + key
+          const fret = Number(digits)
+          if (base !== '0' && fret <= MAX_FRET) {
+            editor.setFretAt(previous.at, fret)
+            lastFret.current = { at: previous.at, digits, time: now }
+            return
+          }
         }
-        const fret = Math.min(Number(key), MAX_FRET)
-        recordPlacement(editor.putNote(editor.stringNumber, fret), String(fret))
+        recordPlacement(editor.putNote(editor.stringNumber, Number(key)), key)
         return
       }
 
