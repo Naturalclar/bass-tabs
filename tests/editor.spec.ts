@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { readFileSync } from 'node:fs'
 import { BASE_PATH } from '../base-path.ts'
 import { pdfPageCount, pdfPageSizeMm } from './pdf.ts'
 
@@ -650,6 +651,56 @@ test.describe('矢印キーで音を動かす', () => {
     await page.keyboard.press('Shift+ArrowUp')
     await page.keyboard.press('3')
     expect(await notes(page)).toEqual(['A3'])
+  })
+})
+
+/**
+ * Bass is written an octave above where it sounds. Written at pitch the open E
+ * string needs three ledger lines and the low end is unreadable, which is the
+ * whole reason for the shift.
+ */
+test.describe('記譜のオクターブ', () => {
+  test('E 弦の開放が加線だらけにならない', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('0')
+    await expect(page.locator('.tab-cell--note')).toHaveText(['0'])
+    await expect(page.getByRole('status')).toContainText('ページ (A4 縦)')
+
+    const drawn = await page.locator('svg.score-page').first().evaluate((svg) => ({
+      ledgers: svg.querySelectorAll('g.vf-ledgers *').length,
+      frets: [...svg.querySelectorAll('g.vf-tabnote text')].map((text) => text.textContent),
+    }))
+
+    // Three ledger lines at sounding pitch, one an octave up. Two leaves slack
+    // for however VexFlow decides to draw a line.
+    expect(drawn.ledgers).toBeLessThanOrEqual(2)
+    // The tab is about where you put your fingers, so it must not move.
+    expect(drawn.frets).toEqual(['0'])
+  })
+
+  test('書き出したファイルが実音を宣言している', async ({ page }, testInfo) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('0')
+    await expect(page.locator('.tab-cell--note')).toHaveText(['0'])
+
+    const download = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: 'MusicXML を書き出す' }).click(),
+    ]).then(([event]) => event)
+    const saved = testInfo.outputPath('octave.musicxml')
+    await download.saveAs(saved)
+    const xml = readFileSync(saved, 'utf8')
+
+    // Written up: the open E string is E2 on paper, E1 in the ear.
+    expect(xml).toContain('<step>E</step>')
+    expect(xml).toContain('<octave>2</octave>')
+    expect(xml).not.toContain('<octave>1</octave>')
+    // ...and the file says so, so other software still knows the real pitch.
+    expect(xml.replace(/\s+/g, ' ')).toContain(
+      '<transpose> <chromatic>0</chromatic> <octave-change>-1</octave-change> </transpose>',
+    )
   })
 })
 

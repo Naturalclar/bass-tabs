@@ -97,6 +97,13 @@ way the validator would still accept (a renamed field, a changed unit) and bump 
 Anything that remembers a position in the score — the digit run in `App.tsx`, the undo history —
 has to be cleared when the open score changes, or it will address the score that was left.
 
+The notation staff is written an octave above sounding pitch, as bass parts are. That shift lives
+only in `musicxml.ts` (`WRITTEN_OCTAVE_SHIFT`) — `tuning.ts` stays at sounding pitch, which is what
+the fret arithmetic and MIDI input are about. The file declares `<transpose>` with
+`octave-change: -1` so it still states the real pitch; OSMD ignores that for display, which is what
+lets both be true at once. Written at pitch, the open E string needs three ledger lines: measured on
+the two-page sample, 201 ledger-line elements against 10.
+
 MusicXML's two numbering schemes run in opposite directions and are the easiest thing to break:
 `<string>` counts from the highest-pitched string (G is 1), `<staff-tuning line>` counts from the
 bottom staff line (low E is 1). `tuning.ts` holds the conversion; don't inline the arithmetic.
