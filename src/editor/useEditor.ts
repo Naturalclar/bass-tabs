@@ -9,9 +9,8 @@ import {
   type TimeSignature,
 } from './model.ts'
 import { toMusicXml } from './musicxml.ts'
+import { readStoredScore, writeStoredScore } from './storage.ts'
 import { MAX_FRET, STRINGS } from './tuning.ts'
-
-const STORAGE_KEY = 'bass-tabs:score'
 
 /** Where the next entry goes: which measure, and how far into it. */
 export type Cursor = { measure: number; index: number }
@@ -25,29 +24,8 @@ export type EditorState = {
   fret: number
 }
 
-function load(): Score {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return emptyScore()
-    const parsed: unknown = JSON.parse(raw)
-    // Nothing validates what is in storage, and a half-written score would
-    // otherwise crash on the first render, so fall back on any surprise.
-    if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      Array.isArray((parsed as Score).measures) &&
-      typeof (parsed as Score).title === 'string'
-    ) {
-      return parsed as Score
-    }
-  } catch {
-    // Storage can throw outright in a private window; an empty score is fine.
-  }
-  return emptyScore()
-}
-
 export function useEditor() {
-  const [score, setScore] = useState<Score>(load)
+  const [score, setScore] = useState<Score>(() => readStoredScore() ?? emptyScore())
   const [cursor, setCursor] = useState<Cursor>({ measure: 0, index: 0 })
   const [value, setValue] = useState<NoteValue>(4)
   const [dotted, setDotted] = useState(false)
@@ -56,12 +34,7 @@ export function useEditor() {
   const [stringNumber, setStringNumber] = useState(STRINGS[STRINGS.length - 1].number)
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(score))
-    } catch {
-      // Out of quota or storage blocked: losing persistence is not worth
-      // interrupting the person mid-edit.
-    }
+    writeStoredScore(score)
   }, [score])
 
   const musicXml = useMemo(() => toMusicXml(score), [score])

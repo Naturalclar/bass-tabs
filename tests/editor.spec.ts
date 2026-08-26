@@ -92,14 +92,16 @@ test('clicking an existing note writes at that note, not at the cursor', async (
 
   await page.getByRole('button', { name: '1 小節目 1 番目 A 弦' }).click()
 
-  // The first note moved to the A string. No third note appeared.
+  // The first note moved to the A string. No third note appeared. Read the
+  // lanes off the grid rather than out of storage: which string a note sits on
+  // is what the person sees, and the stored shape is free to change.
   await expect(page.locator('.tab-cell--note')).toHaveCount(2)
-  const strings = await page.locator('svg.score-page').first().evaluate(() => {
-    const stored = localStorage.getItem('bass-tabs:score')
-    const score = JSON.parse(stored ?? '{}') as { measures: { string?: number }[][] }
-    return score.measures[0].map((entry) => entry.string)
-  })
-  expect(strings).toEqual([3, 4])
+  const lanes = await page
+    .locator('.tab-cell--note')
+    .evaluateAll((cells) =>
+      cells.map((cell) => cell.getAttribute('aria-label')?.match(/([GDAE]) 弦$/)?.[1]),
+    )
+  expect(lanes).toEqual(['A', 'E'])
 })
 
 test('clicking a later measure writes into that measure', async ({ page }) => {
@@ -155,6 +157,65 @@ test('a click cannot overfill the measure either', async ({ page }) => {
   await page.getByRole('button', { name: '1 小節目 1 番目 G 弦' }).click()
 
   await expect(page.getByText('この小節の残り: 0 拍')).toBeVisible()
+})
+
+/**
+ * The saved score is the one input nothing type-checks: it was written by
+ * whatever version of the code ran last. Because it is persisted, a shape the
+ * app cannot read does not fail once -- it fails on every reload, and the 新規
+ * button that would clear it never renders. Every one of these used to leave a
+ * blank page.
+ */
+test.describe('restoring a saved score', () => {
+  const BROKEN: { label: string; stored: string }[] = [
+    { label: '拍子が欠けている', stored: '{"title":"x","keyFifths":0,"measures":[[]]}' },
+    {
+      label: '音の中身が壊れている',
+      stored:
+        '{"title":"x","keyFifths":0,"time":{"beats":4,"beatType":4},"measures":[[{"kind":"note"}]]}',
+    },
+    { label: 'JSON ですらない', stored: 'not json at all' },
+    {
+      label: '知らない版で書かれている',
+      stored: '{"version":999,"score":{"title":"x","keyFifths":0,"time":{"beats":4,"beatType":4},"measures":[[]]}}',
+    },
+  ]
+
+  for (const { label, stored } of BROKEN) {
+    test(`${label}保存データでも起動して空の譜面から始まる`, async ({ page }) => {
+      await page.addInitScript((value) => {
+        localStorage.setItem('bass-tabs:score', value)
+      }, stored)
+
+      await openEditor(page)
+
+      await expect(page.locator('.editor-panel')).toBeVisible()
+      await expect(page.locator('.tab-cell--note')).toHaveCount(0)
+      // Still a working editor, not just a page that rendered.
+      await fillFirstMeasure(page, 'E')
+      await expect(page.locator('svg.score-page')).toHaveCount(1)
+    })
+  }
+
+  test('版の無い古い保存データは読み直せる', async ({ page }) => {
+    // What shipped before the envelope existed: a bare Score.
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        'bass-tabs:score',
+        JSON.stringify({
+          title: 'legacy',
+          keyFifths: 0,
+          time: { beats: 4, beatType: 4 },
+          measures: [[{ kind: 'note', string: 4, fret: 3, value: 4, dotted: false }], [], [], []],
+        }),
+      )
+    })
+
+    await openEditor(page)
+
+    await expect(page.locator('.tab-cell--note')).toHaveText(['3'])
+    await expect(page.getByRole('status')).toContainText('legacy')
+  })
 })
 
 test('an exported score can be loaded back in', async ({ page }, testInfo) => {
