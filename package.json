@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "pnpm typecheck && vite build",
     "preview": "vite preview",
-    "lint": "oxlint",
+    "lint": "oxlint --deny-warnings",
     "typecheck": "tsc -b --noEmit",
     "check": "pnpm lint && pnpm typecheck",
     "test:print": "playwright test"

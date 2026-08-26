@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { BASE_PATH } from '../base-path.ts'
+import { pdfPageCount, pdfPageSizeMm } from './pdf.ts'
 
 /**
  * Guards the print contract: open a MusicXML file, then assert that what comes
@@ -11,7 +12,6 @@ import { BASE_PATH } from '../base-path.ts'
  * deliberately measure both media, not just print.
  */
 
-const MM_PER_PT = 25.4 / 72
 const PX_PER_MM = 96 / 25.4
 
 /** Every sample renders to two A4 pages; see README for the measured values. */
@@ -21,26 +21,7 @@ const SAMPLES = [
   { file: 'bass-tab.musicxml', pages: 2 },
 ]
 
-/**
- * Chromium writes an uncompressed page tree, so the page objects can be counted
- * without a PDF library. `/Type /Page` must not match `/Type /Pages` (the tree
- * root), hence the lookahead.
- */
-function pdfPageCount(pdf: Buffer): number {
-  return (pdf.toString('latin1').match(/\/Type\s*\/Page(?![s\w])/g) ?? []).length
-}
 
-/** First /MediaBox in the file, converted to millimetres. */
-function pdfPageSizeMm(pdf: Buffer): { width: number; height: number } {
-  const box = pdf
-    .toString('latin1')
-    .match(/\/MediaBox\s*\[\s*([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s*\]/)
-  if (!box) throw new Error('no /MediaBox in the generated PDF')
-  return {
-    width: (Number(box[3]) - Number(box[1])) * MM_PER_PT,
-    height: (Number(box[4]) - Number(box[2])) * MM_PER_PT,
-  }
-}
 
 async function openSample(page: Page, file: string) {
   // Navigate to the real path rather than '/'. `vite preview` happens to

@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { BASE_PATH } from '../base-path.ts'
+import { pdfPageCount, pdfPageSizeMm } from './pdf.ts'
 
 /**
  * The editor's whole point is that its output goes through the same path as an
@@ -8,22 +9,8 @@ import { BASE_PATH } from '../base-path.ts'
  * can still paginate wrongly, and printing is what this app is for.
  */
 
-const MM_PER_PT = 25.4 / 72
 
-function pdfPageCount(pdf: Buffer): number {
-  return (pdf.toString('latin1').match(/\/Type\s*\/Page(?![s\w])/g) ?? []).length
-}
 
-function pdfPageSizeMm(pdf: Buffer): { width: number; height: number } {
-  const box = pdf
-    .toString('latin1')
-    .match(/\/MediaBox\s*\[\s*([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s*\]/)
-  if (!box) throw new Error('no /MediaBox in the generated PDF')
-  return {
-    width: (Number(box[3]) - Number(box[1])) * MM_PER_PT,
-    height: (Number(box[4]) - Number(box[2])) * MM_PER_PT,
-  }
-}
 
 async function openEditor(page: Page) {
   await page.goto(BASE_PATH)
