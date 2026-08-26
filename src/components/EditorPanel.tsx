@@ -28,6 +28,10 @@ type Props = {
   onFret: (fret: number) => void
   onRest: () => void
   onDelete: () => void
+  onUndo: () => void
+  onRedo: () => void
+  canUndo: boolean
+  canRedo: boolean
   onConnectMidi: () => void
   onExport: () => void
   onReset: () => void
@@ -212,6 +216,12 @@ export function EditorPanel(props: Props) {
           <button type="button" className="chip" onClick={props.onDelete}>
             削除
           </button>
+          <button type="button" className="chip" onClick={props.onUndo} disabled={!props.canUndo}>
+            取り消し
+          </button>
+          <button type="button" className="chip" onClick={props.onRedo} disabled={!props.canRedo}>
+            やり直し
+          </button>
         </div>
 
         <span className="editor-remaining">この小節の残り: {props.remaining / DIVISIONS} 拍</span>
@@ -238,6 +248,7 @@ export function EditorPanel(props: Props) {
         レーンをクリックで音を置く。数字キーでフレット、↑↓ で弦、←→ でカーソル移動、
         <kbd>w</kbd> <kbd>h</kbd> <kbd>q</kbd> <kbd>e</kbd> <kbd>s</kbd> で音価、
         <kbd>.</kbd> で付点、<kbd>r</kbd> で休符、<kbd>Backspace</kbd> で削除。
+        <kbd>Ctrl/⌘+Z</kbd> で取り消し、<kbd>Ctrl/⌘+Shift+Z</kbd> でやり直し。
       </p>
     </section>
   )

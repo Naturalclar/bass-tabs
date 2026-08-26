@@ -265,6 +265,113 @@ test.describe('小節数の入力', () => {
   })
 })
 
+/**
+ * Undo exists because several edits throw work away with no other way back:
+ * lowering the measure count drops whole bars, 新規 drops everything, and a
+ * mis-typed fret overwrites what was there.
+ */
+test.describe('取り消しとやり直し', () => {
+  const notesPerBar = (page: Page) =>
+    page
+      .locator('.tab-measure')
+      .evaluateAll((bars) => bars.map((bar) => bar.querySelectorAll('.tab-cell--note').length))
+
+  async function undo(page: Page) {
+    await page.keyboard.press('ControlOrMeta+z')
+  }
+
+  test('置いた音が Ctrl+Z で消える', async ({ page }) => {
+    await openEditor(page)
+    await page.getByRole('button', { name: '1 小節目 1 番目 E 弦' }).click()
+    await expect(page.locator('.tab-cell--note')).toHaveCount(1)
+
+    await undo(page)
+    await expect(page.locator('.tab-cell--note')).toHaveCount(0)
+  })
+
+  test('小節数を減らして取り消すと音ごと戻る', async ({ page }) => {
+    await openEditor(page)
+    for (const bar of [1, 2, 3, 4]) {
+      await page.getByRole('button', { name: `${bar} 小節目 1 番目 E 弦` }).click()
+    }
+
+    const field = page.getByLabel('小節数')
+    await field.click()
+    await field.press('ControlOrMeta+a')
+    await field.pressSequentially('2')
+    await field.press('Enter')
+    expect(await notesPerBar(page)).toEqual([1, 1])
+
+    // Out of the field first: inside it, Ctrl+Z belongs to the text input.
+    await page.locator('.tab-editor').focus()
+    await undo(page)
+    expect(await notesPerBar(page)).toEqual([1, 1, 1, 1])
+  })
+
+  test('連続した数字入力は 1 回で戻る', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    // "1" then "2" is one note at the 12th fret, so it is one step back.
+    await page.keyboard.press('1')
+    await page.keyboard.press('2')
+    await expect(page.locator('.tab-cell--note')).toHaveText(['12'])
+
+    await undo(page)
+    await expect(page.locator('.tab-cell--note')).toHaveCount(0)
+  })
+
+  test('曲名の入力は 1 文字ずつ戻らない', async ({ page }) => {
+    await openEditor(page)
+    await page.getByRole('button', { name: '1 小節目 1 番目 E 弦' }).click()
+
+    const title = page.getByLabel('曲名')
+    await title.click()
+    await title.press('ControlOrMeta+a')
+    await title.pressSequentially('riff', { delay: 60 })
+    await expect(page.getByRole('status')).toContainText('riff')
+
+    await page.locator('.tab-editor').focus()
+    await undo(page)
+
+    // One step took the whole word, and the note placed before it survives.
+    await expect(page.getByRole('status')).not.toContainText('riff')
+    await expect(page.locator('.tab-cell--note')).toHaveCount(1)
+  })
+
+  test('曲名の欄では Ctrl+Z が譜面を戻さない', async ({ page }) => {
+    await openEditor(page)
+    await page.getByRole('button', { name: '1 小節目 1 番目 E 弦' }).click()
+
+    const title = page.getByLabel('曲名')
+    await title.click()
+    await title.press('ControlOrMeta+z')
+
+    // The browser owns undo inside a text field; the note stays put.
+    await expect(page.locator('.tab-cell--note')).toHaveCount(1)
+  })
+
+  test('やり直しで戻した編集が復活する', async ({ page }) => {
+    await openEditor(page)
+    await page.getByRole('button', { name: '1 小節目 1 番目 E 弦' }).click()
+    await undo(page)
+    await expect(page.locator('.tab-cell--note')).toHaveCount(0)
+
+    await page.keyboard.press('ControlOrMeta+Shift+z')
+    await expect(page.locator('.tab-cell--note')).toHaveCount(1)
+  })
+
+  test('新規も取り消せる', async ({ page }) => {
+    await openEditor(page)
+    await page.getByRole('button', { name: '1 小節目 1 番目 E 弦' }).click()
+    await page.getByRole('button', { name: '新規' }).click()
+    await expect(page.locator('.tab-cell--note')).toHaveCount(0)
+
+    await page.locator('.tab-editor').focus()
+    await undo(page)
+    await expect(page.locator('.tab-cell--note')).toHaveCount(1)
+  })
+})
+
 test('an exported score can be loaded back in', async ({ page }, testInfo) => {
   await openEditor(page)
   await fillFirstMeasure(page, 'A')

@@ -75,6 +75,11 @@ Two things constrain `musicxml.ts`:
 - `DIVISIONS` is 24 because that is the smallest value keeping every supported duration a whole
   number, down to a dotted 16th (9).
 
+Every change to the score goes through `commit()` in `useEditor`, which is also where undo records
+its snapshots — so a new mutation must call `commit()` rather than `setScore` directly, or it will
+be invisible to undo. Passing the same `CommitKey` as the previous commit extends that step instead
+of adding one; that is how a typed title or a two-digit fret stays a single undo.
+
 `src/editor/storage.ts` owns the one saved score. Everything the app reads off a restored score is
 validated there, because the stored value is the only input nothing type-checks — it was written by
 whatever version of the code ran last, and a shape the app cannot read fails on *every* reload with

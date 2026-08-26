@@ -51,6 +51,42 @@ export default function App() {
    */
   const lastFret = useRef<{ at: Cursor; digits: string | null; time: number } | null>(null)
 
+  const handleUndo = useCallback(() => {
+    // The slot the current run of digits was amending may not exist after a
+    // jump through history, so the next digit has to start a new fret.
+    lastFret.current = null
+    editor.undo()
+  }, [editor])
+
+  const handleRedo = useCallback(() => {
+    lastFret.current = null
+    editor.redo()
+  }, [editor])
+
+  useEffect(() => {
+    if (mode !== 'edit') return
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (!event.metaKey && !event.ctrlKey) return
+      const key = event.key.toLowerCase()
+      if (key !== 'z' && key !== 'y') return
+      // Inside a text field this belongs to the browser: undoing the score
+      // while someone is fixing a typo in the title is not what they asked for.
+      const target = event.target as HTMLElement | null
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable
+      ) {
+        return
+      }
+      event.preventDefault()
+      if (key === 'y' || event.shiftKey) handleRedo()
+      else handleUndo()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [handleRedo, handleUndo, mode])
+
   const recordPlacement = useCallback((at: Cursor | null, digits: string | null) => {
     lastFret.current = at ? { at, digits, time: Date.now() } : null
   }, [])
@@ -58,6 +94,8 @@ export default function App() {
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       const key = event.key
+      // Ctrl/Cmd combinations belong to the window handler above.
+      if (event.metaKey || event.ctrlKey) return
       if (/^[0-9]$/.test(key)) {
         const now = Date.now()
         const previous = lastFret.current
@@ -161,6 +199,10 @@ export default function App() {
             onFret={editor.setFret}
             onRest={editor.putRest}
             onDelete={editor.removeAtCursor}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            canUndo={editor.canUndo}
+            canRedo={editor.canRedo}
             onConnectMidi={() => void midi.connect()}
             onExport={handleExport}
             onReset={editor.reset}
