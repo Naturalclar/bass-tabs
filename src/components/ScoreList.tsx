@@ -88,7 +88,7 @@ export function ScoreList({
             id={inputId}
             className="visually-hidden"
             type="file"
-            accept=".json,.xml,.musicxml"
+            accept=".json,.xml,.musicxml,.png,.jpg,.jpeg,.webp"
             onChange={handleFile}
           />
         </label>

@@ -82,6 +82,15 @@ its snapshots — so a new mutation must call `commit()` rather than `setScore` 
 be invisible to undo. Passing the same `CommitKey` as the previous commit extends that step instead
 of adding one; that is how a typed title or a two-digit fret stays a single undo.
 
+`src/editor/tabImage.ts` + `imageImport.ts` read a screenshot of a tab into a `Score`:
+pixel analysis (line detection, glyph clustering — pure, testable) in the former, OCR
+orchestration in the latter. tesseract.js and its assets are self-hosted under `public/ocr/`
+(lazy-loaded; `.oxlintrc.json` ignores that dir — it is third-party build output). Note values
+are deliberately not guessed: everything imports as eighth notes and the editor is the
+correction UI. The synthetic-screenshot tests in `tests/editor.spec.ts` are the spec for what
+the analyser must survive (both ink polarities, digits crossing the string lines, chords
+refused).
+
 `src/editor/storage.ts` owns the saved scores: one key per score plus an index naming them and
 remembering which was open. Per-score keys are what let an edit write only the score being edited —
 the app saves on every keystroke, and rewriting the whole library that often would get slower with
