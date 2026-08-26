@@ -28,6 +28,7 @@ export function VideoImport({ onAppend }: Props) {
   )
   const streamRef = useRef<MediaStream | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const playerRef = useRef<HTMLIFrameElement>(null)
 
   const stopSharing = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop())
@@ -82,14 +83,42 @@ export function VideoImport({ onAppend }: Props) {
     setBusy(true)
     setNotice('読み取っています…')
     try {
-      const canvas = document.createElement('canvas')
-      canvas.width = video.videoWidth
-      canvas.height = video.videoHeight
-      const context = canvas.getContext('2d') as CanvasRenderingContext2D
-      context.drawImage(video, 0, 0)
-      const result = await readTabEntries(
-        context.getImageData(0, 0, canvas.width, canvas.height),
-      )
+      const frameOf = (region?: { x: number; y: number; w: number; h: number }) => {
+        const area = region ?? { x: 0, y: 0, w: video.videoWidth, h: video.videoHeight }
+        const canvas = document.createElement('canvas')
+        canvas.width = area.w
+        canvas.height = area.h
+        const context = canvas.getContext('2d') as CanvasRenderingContext2D
+        context.drawImage(video, area.x, area.y, area.w, area.h, 0, 0, area.w, area.h)
+        return context.getImageData(0, 0, area.w, area.h)
+      }
+
+      // When the person shared this tab, the frame is this page's viewport,
+      // and the player's own rectangle is knowable -- reading just that keeps
+      // the page around the video (its text, its blocks of colour) out of the
+      // analysis. The scale check is what tells "shared this tab" apart from
+      // "shared a window or screen", where the rectangle would land on the
+      // wrong pixels; and if the crop finds no staff, the full frame gets its
+      // turn, so a wrong guess costs a retry, not the capture.
+      let cropped: { x: number; y: number; w: number; h: number } | undefined
+      const rect = playerRef.current?.getBoundingClientRect()
+      const page = document.documentElement
+      if (rect && rect.width > 0) {
+        const scaleX = video.videoWidth / page.clientWidth
+        const scaleY = video.videoHeight / page.clientHeight
+        if (Math.abs(scaleX / scaleY - 1) < 0.1 && scaleX > 0.5 && scaleX < 4) {
+          const x = Math.max(0, Math.floor(rect.left * scaleX))
+          const y = Math.max(0, Math.floor(rect.top * scaleY))
+          const w = Math.min(video.videoWidth - x, Math.ceil(rect.width * scaleX))
+          const h = Math.min(video.videoHeight - y, Math.ceil(rect.height * scaleY))
+          if (w > 50 && h > 50) cropped = { x, y, w, h }
+        }
+      }
+
+      let result = await readTabEntries(frameOf(cropped))
+      if (!result.ok && result.reason === 'no-lanes' && cropped) {
+        result = await readTabEntries(frameOf())
+      }
       if (!result.ok) {
         setNotice(
           result.reason === 'no-lanes'
@@ -144,6 +173,7 @@ export function VideoImport({ onAppend }: Props) {
       </p>
       {videoId && (
         <iframe
+          ref={playerRef}
           className="video-import__player"
           src={`https://www.youtube-nocookie.com/embed/${videoId}`}
           title="YouTube"
