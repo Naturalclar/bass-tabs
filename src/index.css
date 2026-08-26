@@ -258,10 +258,22 @@ body {
   border-right: 2px solid var(--ui-border);
 }
 
+/* A button now -- it starts playback at its measure -- but drawn as the
+   quiet label it always was. */
 .tab-measure__number {
   font-size: 0.7rem;
   color: var(--ui-muted);
   min-width: 1.2rem;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.tab-measure__number:hover {
+  color: var(--ui-fg);
 }
 
 .tab-measure__grid {
@@ -280,6 +292,14 @@ body {
 
 .tab-column--selected {
   background: #2d4a72;
+}
+
+/* The column being sounded. An outline, not a background: it must stay
+   visible on top of --selected, and it must not change any text/background pair
+   the contrast checks measure. */
+.tab-column--playing {
+  outline: 2px solid #7ab648;
+  outline-offset: -1px;
 }
 
 .tab-column__value {

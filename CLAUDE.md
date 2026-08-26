@@ -10,12 +10,12 @@ Vite + React + TypeScript, rendering via OpenSheetMusicDisplay (OSMD).
 It also has a tab editor, so a score can be written in the app instead of imported — but only as a
 way to get something onto paper.
 
-Explicitly out of scope: cursor following, follow-along scrolling, section looping, tempo
-changes while playing. Anything "follow along on screen while playing" belongs to a separate
-alphaTab experiment, not here. A feature request phrased as "it would be nice while practicing"
-is usually this, so check before building it. Playback itself exists, but only as a proofing
-tool: one run from the top at a playback-only BPM, to hear whether the entered notes are right
-before printing them — it deliberately grows none of the follow-along features above.
+Printing comes first, and playback is second: it started as a proofing tool and has since been
+*deliberately re-scoped* (2026-08) into a practice tool — the tab grid highlights the column
+being sounded, and clicking a measure number plays from that measure. Follow-along features are
+in scope now; section looping and live tempo changes are simply not built yet. The follow-along
+happens on the app's own tab grid, never by driving OSMD's cursor over the rendered page — the
+page stays a print preview.
 
 ## Commands
 

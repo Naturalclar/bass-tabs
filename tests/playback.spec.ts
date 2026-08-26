@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { schedule, secondsPerTick } from '../src/editor/playback.ts'
+import { columnAt, schedule, secondsPerTick, ticksAt } from '../src/editor/playback.ts'
 import {
   DIVISIONS,
   type Entry,
@@ -106,7 +106,7 @@ test.describe('テンポ', () => {
     await page.keyboard.press('3')
     // 表示はアイコンだが、アクセシブルネームは「再生」のまま -- e2e も
     // スクリーンリーダーもこの名前に依存している。
-    const play = page.getByRole('button', { name: '再生' })
+    const play = page.getByRole('button', { name: '再生', exact: true })
     await expect(play).toBeEnabled()
     await expect(play.locator('svg')).toHaveCount(1)
   })
@@ -130,6 +130,22 @@ test.describe('再生のスケジュール', () => {
     measures: Entry[][],
     time: TimeSignature = { beats: 4, beatType: 4 },
   ): Score => ({ title: '', keyFifths: 0, time, tempo: 160, measures })
+
+  test('columnAt と ticksAt は互いの逆で、書きかけの小節の尻は null', () => {
+    const score = scoreOf([[note(0), note(2)], [note(5)]])
+    // 各列の開始 tick に対して columnAt が同じ列を返す
+    for (const at of [
+      { measure: 0, index: 0 },
+      { measure: 0, index: 1 },
+      { measure: 1, index: 0 },
+    ]) {
+      expect(columnAt(score, ticksAt(score, at))).toEqual(at)
+    }
+    // 1 小節目の 3 拍目以降は何も書かれていない: 静かな尻は列を持たない
+    expect(columnAt(score, quarter * 2)).toBeNull()
+    // 列の途中の tick はその列のまま
+    expect(columnAt(score, quarter / 2)).toEqual({ measure: 0, index: 0 })
+  })
 
   test('和音は同じ時刻に全部鳴る', () => {
     const chord: Entry = {
@@ -206,10 +222,81 @@ test.describe('再生のスケジュール', () => {
  * ヘッドレスでは音が出ていることは検査できないので、e2e はボタンの状態遷移が
  * 壊れていないことだけを見る煙テスト。鳴らす中身は上の純関数の検査が持つ。
  */
+/**
+ * 追従系はスコープ転換 (#66, #67) で対象になった: いま鳴っている列が
+ * タブ譜の上で光り、小節番号のクリックがその小節からの再生になる。
+ * 追従はアプリ自身のグリッドで行い、OSMD のページには触らない --
+ * ページは印刷プレビューのまま。
+ */
+test.describe('追従と頭出し', () => {
+  test('小節番号のクリックでその小節から鳴り、いまの列が光る', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    // 1 小節目は 30 BPM の全音符 = 8 秒。頭出しが効いていなければ、この
+    // 検査のタイムアウト (5 秒) 内に 2 小節目へ到達できない -- 到達を
+    // 待つ自動リトライで頭出しの欠如が隠れないようにするための長さ。
+    await page.keyboard.press('w')
+    await page.keyboard.press('3')
+    await page.keyboard.press('q')
+    await page.keyboard.press('5')
+    await page.keyboard.press('5')
+    await page.getByLabel('BPM').fill('30')
+
+    await page.getByRole('button', { name: '2 小節目から再生' }).click()
+    await expect(page.getByRole('button', { name: '停止' })).toBeVisible()
+
+    // 光るのは 2 小節目の列: 頭出しが効いていて、1 小節目は飛ばされた
+    await expect(page.locator('.tab-measure').nth(1).locator('.tab-column--playing')).toHaveCount(1)
+    await expect(page.locator('.tab-measure').nth(0).locator('.tab-column--playing')).toHaveCount(0)
+
+    await page.getByRole('button', { name: '停止' }).click()
+    await expect(page.locator('.tab-column--playing')).toHaveCount(0)
+  })
+
+  test('再生が進むとハイライトが次の列へ動く', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    for (const key of ['3', '5', '7']) await page.keyboard.press(key)
+    // 60 BPM の 4 分音符 = 1 拍 1 秒: 1.2 秒後には 2 列目にいる
+    await page.getByLabel('BPM').fill('60')
+    await page.getByRole('button', { name: '1 小節目から再生' }).click()
+
+    const playingIndex = () =>
+      page
+        .locator('.tab-measure')
+        .first()
+        .locator('.tab-column')
+        .evaluateAll((columns) =>
+          columns.findIndex((column) => column.classList.contains('tab-column--playing')),
+        )
+    await expect
+      .poll(playingIndex, { timeout: 3000 })
+      .toBeGreaterThan(0)
+
+    await page.getByRole('button', { name: '停止' }).click()
+  })
+
+  test('再生中に別の小節番号を押すとそこへ跳ぶ', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    for (const key of ['3', '3', '3', '3', '5', '5', '5', '5']) await page.keyboard.press(key)
+    await page.getByLabel('BPM').fill('30')
+
+    await page.getByRole('button', { name: '1 小節目から再生' }).click()
+    await expect(page.locator('.tab-measure').nth(0).locator('.tab-column--playing')).toHaveCount(1)
+
+    await page.getByRole('button', { name: '2 小節目から再生' }).click()
+    await expect(page.locator('.tab-measure').nth(1).locator('.tab-column--playing')).toHaveCount(1)
+    await expect(page.locator('.tab-measure').nth(0).locator('.tab-column--playing')).toHaveCount(0)
+
+    await page.getByRole('button', { name: '停止' }).click()
+  })
+})
+
 test.describe('再生', () => {
   test('空の譜面は再生できず、音を置くと再生 → 停止で戻る', async ({ page }) => {
     await openEditor(page)
-    const play = page.getByRole('button', { name: '再生' })
+    const play = page.getByRole('button', { name: '再生', exact: true })
     await expect(play).toBeDisabled()
 
     await fillFirstMeasure(page, 'E')
@@ -222,20 +309,20 @@ test.describe('再生', () => {
     await expect(stop).toBeVisible()
 
     await stop.click()
-    await expect(page.getByRole('button', { name: '再生' })).toBeEnabled()
+    await expect(page.getByRole('button', { name: '再生', exact: true })).toBeEnabled()
   })
 
   test('譜面を切り替えると再生は止まる', async ({ page }) => {
     await openEditor(page)
     await fillFirstMeasure(page, 'E')
     await page.getByLabel('BPM').fill('30')
-    await page.getByRole('button', { name: '再生' }).click()
+    await page.getByRole('button', { name: '再生', exact: true }).click()
     await expect(page.getByRole('button', { name: '停止' })).toBeVisible()
 
     await page.getByRole('button', { name: '＋ 追加' }).click()
 
     // 新しい譜面は空なので、再生は止まり、鳴らすものも無い
-    const play = page.getByRole('button', { name: '再生' })
+    const play = page.getByRole('button', { name: '再生', exact: true })
     await expect(play).toBeVisible()
     await expect(play).toBeDisabled()
   })

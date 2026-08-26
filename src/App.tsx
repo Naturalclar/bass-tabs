@@ -12,6 +12,7 @@ import { toBackup } from './editor/backup.ts'
 import { importFile, isTabImage } from './editor/importFile.ts'
 import { useMidiInput } from './editor/useMidiInput.ts'
 import { usePlayback } from './editor/usePlayback.ts'
+import { ticksAt } from './editor/playback.ts'
 
 export type Mode = 'open' | 'edit' | 'video'
 
@@ -178,7 +179,11 @@ export default function App() {
                 measures={editor.score.measures}
                 time={editor.score.time}
                 cursor={editor.cursor}
+                playingAt={playback.position}
                 onPlace={keyboard.clickLane}
+                onPlayFrom={(measure) =>
+                  playback.playFrom(ticksAt(editor.score, { measure, index: 0 }))
+                }
                 onKeyDown={keyboard.handleKeyDown}
               />
             </div>
