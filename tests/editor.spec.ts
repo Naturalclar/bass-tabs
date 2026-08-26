@@ -993,6 +993,95 @@ test.describe('書き出しと取り込み', () => {
     })
   }
 
+  /**
+   * MusicXML the model cannot hold. Everything here used to slip through:
+   * the oversized score saved, said 取り込みました, and then vanished on the
+   * next visit when the storage validator refused to read it back; the chord
+   * unravelled into sequential beats and overfilled its bar (残り -1 拍), a
+   * state the editor itself can never create.
+   */
+  const tabXml = (measureCount: number, firstMeasureNotes: string) => {
+    const note = `<note><pitch><step>E</step><octave>2</octave></pitch><duration>24</duration><type>quarter</type><staff>1</staff><notations><technical><string>4</string><fret>0</fret></technical></notations></note>`
+    const measure = (n: number) =>
+      `<measure number="${n}">${
+        n === 1
+          ? `<attributes><divisions>24</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>TAB</sign><line>5</line></clef></attributes>${firstMeasureNotes}`
+          : note
+      }</measure>`
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0">
+  <part-list><score-part id="P1"><part-name>Bass</part-name></score-part></part-list>
+  <part id="P1">${Array.from({ length: measureCount }, (_, i) => measure(i + 1)).join('')}</part>
+</score-partwise>`
+  }
+  const quarterOn = (string: number, fret: number, extra = '') =>
+    `<note>${extra}<pitch><step>E</step><octave>2</octave></pitch><duration>24</duration><type>quarter</type><staff>1</staff><notations><technical><string>${string}</string><fret>${fret}</fret></technical></notations></note>`
+
+  test('65 小節の MusicXML は取り込まず、理由を出す', async ({ page }) => {
+    await openEditor(page)
+
+    await page.setInputFiles(
+      '.sidebar input[type="file"]',
+      fixture('too-long.musicxml', tabXml(65, quarterOn(4, 0))),
+    )
+    await expect(page.locator('.sidebar__notice')).toContainText('小節が多すぎて')
+    await expect(page.locator('.score-row')).toHaveCount(1)
+
+    // The old behaviour was worse than a failure: it said 取り込みました and
+    // the score then vanished on reload. Nothing may be lost either way.
+    await page.reload()
+    await expect(page.locator('.score-row')).toHaveCount(1)
+  })
+
+  test('64 小節ちょうどはまだ取り込める', async ({ page }) => {
+    await openEditor(page)
+
+    await page.setInputFiles(
+      '.sidebar input[type="file"]',
+      fixture('at-limit.musicxml', tabXml(64, quarterOn(4, 0))),
+    )
+    await expect(page.locator('.sidebar__notice')).toContainText('1 曲を取り込みました')
+    await page.reload()
+    await expect(page.locator('.score-row')).toHaveCount(2)
+  })
+
+  test('和音入りの MusicXML は取り込まず、理由を出す', async ({ page }) => {
+    await openEditor(page)
+
+    const chord = quarterOn(4, 0) + quarterOn(3, 2, '<chord/>')
+    await page.setInputFiles(
+      '.sidebar input[type="file"]',
+      fixture('chord.musicxml', tabXml(1, chord)),
+    )
+    await expect(page.locator('.sidebar__notice')).toContainText('和音・タイ・装飾音')
+    await expect(page.locator('.score-row')).toHaveCount(1)
+  })
+
+  test('タイ入りの MusicXML は取り込まず、理由を出す', async ({ page }) => {
+    await openEditor(page)
+
+    const tied = quarterOn(4, 0, '<tie type="start"/>') + quarterOn(4, 0, '<tie type="stop"/>')
+    await page.setInputFiles(
+      '.sidebar input[type="file"]',
+      fixture('tie.musicxml', tabXml(1, tied)),
+    )
+    await expect(page.locator('.sidebar__notice')).toContainText('和音・タイ・装飾音')
+    await expect(page.locator('.score-row')).toHaveCount(1)
+  })
+
+  test('拍子に収まらない小節は取り込まず、理由を出す', async ({ page }) => {
+    await openEditor(page)
+
+    // Five plain quarter notes in a 4/4 bar: no chord to blame, just too much.
+    const five = Array.from({ length: 5 }, () => quarterOn(4, 0)).join('')
+    await page.setInputFiles(
+      '.sidebar input[type="file"]',
+      fixture('overfull.musicxml', tabXml(1, five)),
+    )
+    await expect(page.locator('.sidebar__notice')).toContainText('拍子に収まらない')
+    await expect(page.locator('.score-row')).toHaveCount(1)
+  })
+
   test('TAB の無い MusicXML は取り込まず、理由を出す', async ({ page }) => {
     await openEditor(page)
 

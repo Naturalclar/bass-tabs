@@ -10,7 +10,7 @@ import type { ScoreId } from './editor/storage.ts'
 import { fromBackup, toBackup } from './editor/backup.ts'
 import { fromMusicXml } from './editor/musicxmlImport.ts'
 import { useMidiInput } from './editor/useMidiInput.ts'
-import { NOTE_VALUES, type NoteValue } from './editor/model.ts'
+import { MAX_MEASURES, NOTE_VALUES, type NoteValue } from './editor/model.ts'
 import { MAX_FRET, STRINGS } from './editor/tuning.ts'
 
 export type Mode = 'open' | 'edit'
@@ -260,7 +260,13 @@ export default function App() {
         setImportNotice(
           result.reason === 'no-tab'
             ? 'TAB 譜が入っていないので取り込めません（表示は「ファイルを開く」から）'
-            : 'ファイルを読めませんでした',
+            : result.reason === 'unsupported'
+              ? '和音・タイ・装飾音が入っているので取り込めません（表示は「ファイルを開く」から）'
+              : result.reason === 'too-long'
+                ? `小節が多すぎて取り込めません（上限 ${MAX_MEASURES} 小節）`
+                : result.reason === 'overfull'
+                  ? '拍子に収まらない小節があるので取り込めません'
+                  : 'ファイルを読めませんでした',
         )
         return
       }
