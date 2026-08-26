@@ -1,6 +1,7 @@
 import { MAX_MEASURES, measureRemaining, type Entry, type Score } from './model.ts'
 import { MAX_FRET } from './tuning.ts'
 import { analyzeTabImage, otsu } from './tabImage.ts'
+import { BASE_PATH } from '../../base-path.ts'
 
 /**
  * Reads a screenshot of a tab into a Score: pixel analysis finds the digit
@@ -18,8 +19,13 @@ export type ImageImport =
   | { ok: true; score: Score; unread: number }
   | { ok: false; reason: 'unreadable' | 'no-lanes' | 'no-notes' | 'too-long' }
 
-/** All OCR assets are served by this site itself: no CDN at runtime. */
-const OCR_BASE = `${import.meta.env.BASE_URL}ocr/`
+/**
+ * All OCR assets are served by this site itself: no CDN at runtime. The
+ * prefix comes straight from base-path.ts -- the same constant Vite's
+ * `base` (and so `import.meta.env.BASE_URL`) is set from, minus the Vite
+ * indirection, which only exists inside the bundle.
+ */
+const OCR_BASE = `${BASE_PATH}ocr/`
 
 const IMPORT_VALUE = 8
 

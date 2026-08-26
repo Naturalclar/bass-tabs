@@ -6,8 +6,11 @@ import { BASE_PATH } from '../base-path.ts'
 import { pdfPageCount, pdfPageSizeMm } from './pdf.ts'
 import { schedule, secondsPerTick } from '../src/editor/playback.ts'
 import { appendRun, moveBeat, place, stepCursor, toggleString, withTime } from '../src/editor/edit.ts'
+import { importFile, isTabImage } from '../src/editor/importFile.ts'
+import { toBackup } from '../src/editor/backup.ts'
 import {
   DIVISIONS,
+  emptyScore,
   type Entry,
   type NoteValue,
   type Score,
@@ -1899,6 +1902,57 @@ test.describe('編集の純関数', () => {
       { string: 3, fret: 3 },
       { string: 4, fret: 1 },
     ])
+  })
+})
+
+/**
+ * 取り込みファイルの振り分け (importFile.ts)。読み手の断り → 通知文の対応は
+ * ここで直接検査する。MusicXML と画像の経路の中身はブラウザが要る (DOMParser /
+ * OCR) ので、その通知は既存の e2e（書き出しと取り込み・画像からの取り込み）が
+ * 実画面で踏んでいる。
+ */
+test.describe('取り込みファイルの振り分け', () => {
+  const jsonFile = (text: string) => new File([text], 'library.json', { type: 'application/json' })
+
+  test('書き出した JSON はそのまま戻り、曲数を告げる', async () => {
+    const text = toBackup([
+      { id: 'a', score: emptyScore() },
+      { id: 'b', score: emptyScore() },
+    ])
+    const outcome = await importFile(jsonFile(text))
+    expect(outcome.scores).toHaveLength(2)
+    expect(outcome.notice).toBe('2 曲を取り込みました')
+  })
+
+  test('読めない JSON は理由を告げて、何も足さない', async () => {
+    // bass-tabs の書き出しではない JSON
+    const wrongFormat = await importFile(jsonFile(JSON.stringify({ hello: 1 })))
+    expect(wrongFormat.scores).toHaveLength(0)
+    expect(wrongFormat.notice).toBe('この JSON は bass-tabs の書き出しではありません')
+    // 版が違う
+    const wrongVersion = await importFile(
+      jsonFile(JSON.stringify({ format: 'bass-tabs-library', version: 999, scores: [] })),
+    )
+    expect(wrongVersion.notice).toBe('対応していない版の書き出しです')
+    // JSON ですらない
+    const broken = await importFile(jsonFile('{'))
+    expect(broken.scores).toHaveLength(0)
+    expect(broken.notice).toBe('ファイルを読めませんでした')
+  })
+
+  test('importFile は投げない: 読み手が爆発しても通知文になる', async () => {
+    // text() が失敗するファイル。呼び出し側に catch を書かせないのが約束
+    const exploding = { name: 'x.json', text: () => Promise.reject(new Error('boom')) }
+    const outcome = await importFile(exploding as unknown as File)
+    expect(outcome.scores).toHaveLength(0)
+    expect(outcome.notice).toBe('ファイルを読めませんでした: boom')
+  })
+
+  test('画像かどうかは拡張子で見分ける', () => {
+    expect(isTabImage('tab.png')).toBe(true)
+    expect(isTabImage('TAB.JPEG')).toBe(true)
+    expect(isTabImage('score.musicxml')).toBe(false)
+    expect(isTabImage('library.json')).toBe(false)
   })
 })
 
