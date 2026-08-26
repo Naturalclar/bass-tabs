@@ -6,8 +6,12 @@ type Props = {
   measures: Entry[][]
   time: TimeSignature
   cursor: Cursor
+  /** The column playback is sounding right now, if any. */
+  playingAt: Cursor | null
   /** Writes at the clicked slot; the cursor follows from the write. */
   onPlace: (at: Cursor, stringNumber: number) => void
+  /** Starts (or moves) playback at the start of the clicked measure. */
+  onPlayFrom: (measure: number) => void
   onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void
 }
 
@@ -34,7 +38,7 @@ function entryLabel(entry: Entry): string {
  * Each measure ends with an append slot, dropped once the measure is full: a
  * slot that can only refuse what you put in it is worse than no slot.
  */
-export function TabEditor({ measures, time, cursor, onPlace, onKeyDown }: Props) {
+export function TabEditor({ measures, time, cursor, playingAt, onPlace, onPlayFrom, onKeyDown }: Props) {
   return (
     <div
       className="tab-editor"
@@ -45,7 +49,17 @@ export function TabEditor({ measures, time, cursor, onPlace, onKeyDown }: Props)
     >
       {measures.map((entries, measureIndex) => (
         <div className="tab-measure" key={measureIndex}>
-          <span className="tab-measure__number">{measureIndex + 1}</span>
+          {/* The measure number doubles as "play from here": practice starts
+              at a bar, not at the top of the piece. */}
+          <button
+            type="button"
+            className="tab-measure__number"
+            aria-label={`${measureIndex + 1} 小節目から再生`}
+            title="ここから再生"
+            onClick={() => onPlayFrom(measureIndex)}
+          >
+            {measureIndex + 1}
+          </button>
           <div className="tab-measure__grid">
             {appendableColumns(entries, time).map((entry, index, columns) => {
               // With the append slot gone the cursor can sit past the last
@@ -53,11 +67,12 @@ export function TabEditor({ measures, time, cursor, onPlace, onKeyDown }: Props)
               // is also the note the arrow keys move.
               const highlighted = Math.min(cursor.index, columns.length - 1)
               const selected = cursor.measure === measureIndex && highlighted === index
+              const sounding = playingAt?.measure === measureIndex && playingAt.index === index
               return (
                 <div
                   className={`tab-column${selected ? ' tab-column--selected' : ''}${
-                    entry ? '' : ' tab-column--append'
-                  }`}
+                    sounding ? ' tab-column--playing' : ''
+                  }${entry ? '' : ' tab-column--append'}`}
                   key={index}
                 >
                   <span className="tab-column__value">{entry ? entryLabel(entry) : '+'}</span>

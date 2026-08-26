@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Score } from './model.ts'
-import { schedule, secondsPerTick } from './playback.ts'
+import { columnAt, schedule, secondsPerTick } from './playback.ts'
 
 /** Hz for a MIDI note number: 69 is A4 at 440 Hz. */
 function frequency(midi: number): number {
@@ -27,10 +27,13 @@ const LEAD_SECONDS = 0.05
  */
 export function usePlayback(score: Score) {
   const [playing, setPlaying] = useState(false)
+  /** The column being sounded right now, for the grid to highlight. */
+  const [position, setPosition] = useState<{ measure: number; index: number } | null>(null)
   const context = useRef<AudioContext | null>(null)
   /** The one node this run hangs off the destination by. */
   const run = useRef<AudioNode | null>(null)
   const endTimer = useRef<number | null>(null)
+  const positionFrame = useRef<number | null>(null)
 
   const notes = useMemo(() => schedule(score), [score])
 
@@ -39,12 +42,22 @@ export function usePlayback(score: Score) {
       window.clearTimeout(endTimer.current)
       endTimer.current = null
     }
+    if (positionFrame.current !== null) {
+      cancelAnimationFrame(positionFrame.current)
+      positionFrame.current = null
+    }
     run.current?.disconnect()
     run.current = null
     setPlaying(false)
+    setPosition(null)
   }, [])
 
-  const play = useCallback(() => {
+  /**
+   * Plays from a tick -- 0 is the top, and a measure's start comes from
+   * `ticksAt`. Notes before the tick are skipped, everything after shifts
+   * left, which is what "play from here" means.
+   */
+  const playFrom = useCallback((fromTick: number) => {
     if (notes.length === 0 || typeof AudioContext === 'undefined') return
     stop()
     const ctx = (context.current ??= new AudioContext())
@@ -66,7 +79,8 @@ export function usePlayback(score: Score) {
     const first = ctx.currentTime + LEAD_SECONDS
     let lastEnd = first
     for (const note of notes) {
-      const start = first + note.startTicks * perTick
+      if (note.startTicks < fromTick) continue
+      const start = first + (note.startTicks - fromTick) * perTick
       const end = start + note.durationTicks * perTick
       lastEnd = Math.max(lastEnd, end)
 
@@ -97,12 +111,30 @@ export function usePlayback(score: Score) {
       () => stop(),
       (lastEnd - ctx.currentTime + 0.1) * 1000,
     )
-  }, [notes, score.tempo, stop])
+
+    // Follow along on the grid: convert elapsed time back to ticks and let
+    // the pure helper name the column. State changes only when the column
+    // does, so the animation loop does not re-render sixty times a second.
+    let shown: { measure: number; index: number } | null = null
+    const follow = () => {
+      const tick = fromTick + (ctx.currentTime - first) / perTick
+      const column = tick < fromTick ? columnAt(score, fromTick) : columnAt(score, tick)
+      if (column?.measure !== shown?.measure || column?.index !== shown?.index) {
+        shown = column
+        setPosition(column)
+      }
+      positionFrame.current = requestAnimationFrame(follow)
+    }
+    follow()
+  }, [notes, score, stop])
+
+  const play = useCallback(() => playFrom(0), [playFrom])
 
   // Unmount: silence whatever is sounding and give the audio device back.
   useEffect(
     () => () => {
       if (endTimer.current !== null) window.clearTimeout(endTimer.current)
+      if (positionFrame.current !== null) cancelAnimationFrame(positionFrame.current)
       run.current?.disconnect()
       void context.current?.close()
     },
@@ -111,8 +143,10 @@ export function usePlayback(score: Score) {
 
   return {
     playing,
+    position,
     canPlay: notes.length > 0,
     play,
+    playFrom,
     stop,
   }
 }
