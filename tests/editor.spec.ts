@@ -372,6 +372,73 @@ test.describe('取り消しとやり直し', () => {
   })
 })
 
+/**
+ * OSMD rebuilds the whole score DOM on every edit, and while the container is
+ * empty the browser drops the scroll offset -- so the page used to jump to the
+ * top on every single note.
+ *
+ * Two things about writing this check. It measures where the score sits on
+ * screen rather than `window.scrollY`, because an edit can legitimately change
+ * the height of the grid above it (a rest label makes a column taller) and the
+ * browser then shifts scrollY to keep the score still -- which is the outcome
+ * we actually want. And it drives the editor by keyboard only: Playwright's
+ * click() and focus() scroll the target into view themselves, which would mix
+ * their scrolling in with the app's.
+ */
+test.describe('編集中のスクロール位置', () => {
+  const scoreTop = (page: Page) =>
+    page
+      .locator('svg.score-page')
+      .first()
+      .evaluate((svg) => Math.round(svg.getBoundingClientRect().top))
+
+  async function scrolledEditor(page: Page) {
+    await openEditor(page)
+    // Enough measures that the page is taller than the viewport.
+    const field = page.getByLabel('小節数')
+    await field.click()
+    await field.press('ControlOrMeta+a')
+    await field.pressSequentially('8')
+    await field.press('Enter')
+    await expect(page.locator('.tab-measure')).toHaveCount(8)
+
+    await page.locator('.tab-editor').focus()
+    await page.evaluate(() => window.scrollTo(0, 600))
+    // Guards the check itself: if the page could not scroll, everything below
+    // would pass without proving anything.
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+  }
+
+  for (const [label, key] of [
+    ['音を追加しても', '5'],
+    ['休符を追加しても', 'r'],
+  ] as const) {
+    test(`${label}譜面の表示位置が動かない`, async ({ page }) => {
+      await scrolledEditor(page)
+      const before = await scoreTop(page)
+
+      await page.keyboard.press(key)
+      await expect(page.getByRole('status')).toContainText('ページ (A4 縦)')
+
+      expect(await scoreTop(page)).toBe(before)
+      expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+    })
+  }
+
+  test('取り消しても譜面の表示位置が動かない', async ({ page }) => {
+    await scrolledEditor(page)
+    await page.keyboard.press('5')
+    await expect(page.locator('.tab-cell--note')).toHaveCount(1)
+    const before = await scoreTop(page)
+
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect(page.locator('.tab-cell--note')).toHaveCount(0)
+
+    expect(await scoreTop(page)).toBe(before)
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+  })
+})
+
 test('an exported score can be loaded back in', async ({ page }, testInfo) => {
   await openEditor(page)
   await fillFirstMeasure(page, 'A')

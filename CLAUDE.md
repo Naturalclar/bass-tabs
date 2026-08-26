@@ -51,7 +51,9 @@ The whole app is three moving parts:
   so **OSMD does the page breaking**, and the A4-at-96dpi render width.
 - `src/score/useOsmd.ts` — owns the OSMD instance and the load/render cycle. Its
   `makePagesScalable()` post-processes OSMD's output DOM; that function is the fragile part of the
-  codebase and its comments explain why each step exists.
+  codebase and its comments explain why each step exists. It also restores the scroll position
+  around a load: OSMD rebuilds the whole score DOM every time, and an empty container loses the
+  browser's scroll offset — which the editor hits on every keystroke.
 - `src/index.css` — screen layout plus the `@media print` block. Paper size is stated here once
   (`210mm × 297mm`), which only works because pages carry a `viewBox`. The screen UI is dark at
   every surface it paints, `:root` declares `color-scheme: dark` to match, and **every control
