@@ -16,8 +16,9 @@ import { pdfPageCount, pdfPageSizeMm } from './pdf.ts'
 
 
 async function openEditor(page: Page) {
+  // The editor is the first view -- opening the site is opening the editor.
   await page.goto(BASE_PATH)
-  await page.getByRole('button', { name: '譜面を作る' }).click()
+  await page.locator('.tab-editor').waitFor()
 }
 
 /** Fills measure 1 with four quarter notes on the given string. */
@@ -26,6 +27,18 @@ async function fillFirstMeasure(page: Page, stringLabel: string) {
     await page.getByRole('button', { name: `1 小節目 ${i} 番目 ${stringLabel} 弦` }).click()
   }
 }
+
+/**
+ * The first thing on screen is a score, not an empty page waiting for a file.
+ * There is always one to show -- the storage layer restores whatever was open
+ * last, or an empty score -- and a returning user came back for theirs.
+ */
+test('the first view is the score, not the file picker', async ({ page }) => {
+  await page.goto(BASE_PATH)
+
+  await expect(page.locator('svg.score-page')).toHaveCount(1)
+  await expect(page.locator('.tab-editor')).toBeVisible()
+})
 
 test('a score entered by clicking renders and prints as A4', async ({ page }) => {
   await openEditor(page)
@@ -411,7 +424,6 @@ test.describe('譜面の一覧', () => {
     await expect(page.locator('.tab-cell--note')).toHaveText(['9'])
 
     await page.reload()
-    await page.getByRole('button', { name: '譜面を作る' }).click()
 
     await expect(page.locator('.score-row')).toHaveCount(2)
     await expect(page.locator('.tab-cell--note')).toHaveText(['9'])
@@ -673,6 +685,47 @@ test.describe('編集中のスクロール位置', () => {
  * The arrows move the note the grid is highlighting: unmodified they change its
  * pitch, with Shift they change which string plays that same pitch.
  */
+test.describe('Shift+←→ で小節を移動する', () => {
+  const selectedIn = (page: Page, measure: number) =>
+    page.locator('.tab-measure').nth(measure).locator('.tab-column--selected')
+
+  test('小節の先頭へ跳び、端では止まる', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('3')
+    await page.keyboard.press('5')
+
+    await page.keyboard.press('Shift+ArrowRight')
+    // 2 小節目の先頭 (空の小節なので追加スロットが選ばれる)。
+    await expect(selectedIn(page, 1)).toHaveCount(1)
+
+    await page.keyboard.press('Shift+ArrowLeft')
+    await expect(selectedIn(page, 0).locator('.tab-cell--note')).toHaveText('3')
+
+    // 端: 最初の小節より前、最後の小節より後には行かない。
+    await page.keyboard.press('Shift+ArrowLeft')
+    await expect(selectedIn(page, 0)).toHaveCount(1)
+    for (let i = 0; i < 6; i++) await page.keyboard.press('Shift+ArrowRight')
+    await expect(selectedIn(page, 3)).toHaveCount(1)
+    expect(await page.locator('.tab-measure').count()).toBe(4)
+  })
+
+  test('跳んだ先に打った音はその小節に入る', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('3')
+    await page.keyboard.press('Shift+ArrowRight')
+    await page.keyboard.press('7')
+
+    const perBar = await page
+      .locator('.tab-measure')
+      .evaluateAll((bars) =>
+        bars.map((bar) => [...bar.querySelectorAll('.tab-cell--note')].map((c) => c.textContent)),
+      )
+    expect(perBar.slice(0, 2)).toEqual([['3'], ['7']])
+  })
+})
+
 test.describe('矢印キーで音を動かす', () => {
   /** Each note as "<string><fret>", e.g. "E5" for the 5th fret of the E string. */
   const notes = (page: Page) =>
@@ -870,7 +923,6 @@ test.describe('書き出しと取り込み', () => {
     // The whole point: survive losing the browser's storage.
     await page.evaluate(() => localStorage.clear())
     await page.reload()
-    await page.getByRole('button', { name: '譜面を作る' }).click()
     await expect(page.locator('.score-row')).toHaveCount(1)
 
     await page.setInputFiles('.sidebar input[type="file"]', saved)
@@ -964,8 +1016,8 @@ test('an exported score can be loaded back in', async ({ page }, testInfo) => {
   await download.saveAs(saved)
 
   // Round-trip through the import path: this is what catches MusicXML that
-  // renders only because the editor happened to hold it in memory.
-  await page.getByRole('button', { name: '譜面を作る' }).click()
+  // renders only because the editor happened to hold it in memory. Picking a
+  // file leaves the editor by itself.
   await page.setInputFiles('input[type="file"]', saved)
   await expect(page.getByRole('status')).toContainText('ページ (A4 縦)')
   await expect(page.locator('svg.score-page')).toHaveCount(1)
