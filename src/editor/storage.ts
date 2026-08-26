@@ -1,4 +1,4 @@
-import { NOTE_VALUES, type Entry, type Score, type TimeSignature } from './model.ts'
+import { MAX_MEASURES, NOTE_VALUES, type Entry, type Score, type TimeSignature } from './model.ts'
 import { MAX_FRET, STRINGS } from './tuning.ts'
 
 /**
@@ -25,9 +25,6 @@ const STORAGE_KEY = 'bass-tabs:score'
  * with a compatible type, a changed unit, a changed meaning.
  */
 const STORAGE_VERSION = 1
-
-/** Mirrors `setMeasureCount`'s own clamp, so a load cannot produce a score the editor would refuse to make. */
-const MAX_MEASURES = 64
 
 const BEAT_TYPES = [1, 2, 4, 8, 16]
 

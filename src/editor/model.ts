@@ -15,6 +15,9 @@ export type NoteValue = (typeof NOTE_VALUES)[number]
  */
 export const DIVISIONS = 24
 
+/** How many measures a score may hold. */
+export const MAX_MEASURES = 64
+
 /** A whole note, in divisions. */
 const WHOLE = DIVISIONS * 4
 

@@ -1,4 +1,11 @@
-import { DIVISIONS, NOTE_VALUES, type NoteValue, type TimeSignature } from '../editor/model.ts'
+import { useState } from 'react'
+import {
+  DIVISIONS,
+  MAX_MEASURES,
+  NOTE_VALUES,
+  type NoteValue,
+  type TimeSignature,
+} from '../editor/model.ts'
 import { MAX_FRET } from '../editor/tuning.ts'
 import type { MidiStatus } from '../editor/useMidiInput.ts'
 
@@ -67,6 +74,64 @@ function midiLabel(status: MidiStatus): string {
   }
 }
 
+/**
+ * The measure count, applied when the edit is finished rather than on every
+ * keystroke. Lowering the count drops measures and everything written in them,
+ * so a value passing through on the way to another one must not reach the
+ * score: typing "12" over "4" would otherwise truncate to a single measure at
+ * the "1" and take bars 2-4 with it, and nothing here can undo that.
+ */
+function MeasureCountField({
+  count,
+  onCommit,
+}: {
+  count: number
+  onCommit: (count: number) => void
+}) {
+  const [draft, setDraft] = useState(String(count))
+  const [shown, setShown] = useState(count)
+  // Adjusting during render rather than in an effect: 新規 resets the count
+  // behind our back, and the draft has to follow it without a second paint.
+  if (count !== shown) {
+    setShown(count)
+    setDraft(String(count))
+  }
+
+  function commit() {
+    const parsed = Number(draft)
+    // An empty or unparseable field means the person did not finish a number;
+    // put back what the score actually holds rather than clamping to 1.
+    if (draft.trim() === '' || !Number.isFinite(parsed)) {
+      setDraft(String(count))
+      return
+    }
+    const clamped = Math.min(Math.max(Math.round(parsed), 1), MAX_MEASURES)
+    setDraft(String(clamped))
+    if (clamped !== count) onCommit(clamped)
+  }
+
+  return (
+    <label className="editor-field">
+      小節数
+      <input
+        type="number"
+        min={1}
+        max={MAX_MEASURES}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            commit()
+          }
+          if (e.key === 'Escape') setDraft(String(count))
+        }}
+      />
+    </label>
+  )
+}
+
 export function EditorPanel(props: Props) {
   return (
     <section className="editor-panel">
@@ -104,16 +169,7 @@ export function EditorPanel(props: Props) {
             ))}
           </select>
         </label>
-        <label className="editor-field">
-          小節数
-          <input
-            type="number"
-            min={1}
-            max={64}
-            value={props.measureCount}
-            onChange={(e) => props.onMeasureCount(Number(e.target.value))}
-          />
-        </label>
+        <MeasureCountField count={props.measureCount} onCommit={props.onMeasureCount} />
       </div>
 
       <div className="editor-row">

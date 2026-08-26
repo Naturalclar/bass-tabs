@@ -218,6 +218,66 @@ test.describe('restoring a saved score', () => {
   })
 })
 
+/**
+ * Lowering the measure count throws away those measures and everything in
+ * them, with no undo, so a keystroke on the way to another number must not
+ * reach the score. "12" typed over "4" used to truncate at the "1".
+ */
+test.describe('小節数の入力', () => {
+  async function fillBars(page: Page, bars: number) {
+    for (let bar = 1; bar <= bars; bar++) {
+      await page.getByRole('button', { name: `${bar} 小節目 1 番目 E 弦` }).click()
+    }
+  }
+
+  const notesPerBar = (page: Page) =>
+    page
+      .locator('.tab-measure')
+      .evaluateAll((bars) => bars.map((bar) => bar.querySelectorAll('.tab-cell--note').length))
+
+  test('2 桁に打ち替えても入力済みの音が消えない', async ({ page }) => {
+    await openEditor(page)
+    await fillBars(page, 4)
+    expect(await notesPerBar(page)).toEqual([1, 1, 1, 1])
+
+    const field = page.getByLabel('小節数')
+    await field.click()
+    await field.press('ControlOrMeta+a')
+    await field.pressSequentially('12', { delay: 120 })
+    await field.blur()
+
+    expect(await notesPerBar(page)).toEqual([1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0])
+  })
+
+  test('欄を空にしただけでは小節が削られない', async ({ page }) => {
+    await openEditor(page)
+    await fillBars(page, 4)
+
+    const field = page.getByLabel('小節数')
+    await field.click()
+    await field.press('ControlOrMeta+a')
+    await field.press('Backspace')
+    await field.blur()
+
+    // The field goes back to what the score holds; nothing was thrown away.
+    await expect(field).toHaveValue('4')
+    expect(await notesPerBar(page)).toEqual([1, 1, 1, 1])
+  })
+
+  test('確定した減少は今までどおり反映される', async ({ page }) => {
+    await openEditor(page)
+    await fillBars(page, 4)
+
+    const field = page.getByLabel('小節数')
+    await field.click()
+    await field.press('ControlOrMeta+a')
+    await field.pressSequentially('2')
+    await field.press('Enter')
+
+    expect(await notesPerBar(page)).toEqual([1, 1])
+  })
+})
+
 test('an exported score can be loaded back in', async ({ page }, testInfo) => {
   await openEditor(page)
   await fillFirstMeasure(page, 'A')
