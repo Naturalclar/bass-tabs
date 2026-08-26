@@ -72,6 +72,12 @@ Two things constrain `musicxml.ts`:
 - `DIVISIONS` is 24 because that is the smallest value keeping every supported duration a whole
   number, down to a dotted 16th (9).
 
+`src/editor/storage.ts` owns the one saved score. Everything the app reads off a restored score is
+validated there, because the stored value is the only input nothing type-checks — it was written by
+whatever version of the code ran last, and a shape the app cannot read fails on *every* reload with
+no way back from the UI. Change `Score` in a way the validator would still accept (a renamed field,
+a changed unit) and bump `STORAGE_VERSION`.
+
 MusicXML's two numbering schemes run in opposite directions and are the easiest thing to break:
 `<string>` counts from the highest-pitched string (G is 1), `<staff-tuning line>` counts from the
 bottom staff line (low E is 1). `tuning.ts` holds the conversion; don't inline the arithmetic.
