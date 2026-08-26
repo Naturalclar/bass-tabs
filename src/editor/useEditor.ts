@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   MAX_MEASURES,
+  clampTempo,
   emptyScore,
   fits,
   measureRemaining,
@@ -92,6 +93,20 @@ export function useEditor() {
   useEffect(() => {
     writeScore(currentId, score)
   }, [currentId, score])
+
+  // The very first visit invents a library in memory, and nothing above has
+  // written its index yet -- so the first session's edits saved their score
+  // under an id no index named, and a reload came up empty. Write the index
+  // once on mount; after that the add/remove/switch paths keep it current.
+  const wroteIndex = useRef(false)
+  useEffect(() => {
+    if (wroteIndex.current) return
+    wroteIndex.current = true
+    writeIndex(
+      scores.map((entry) => entry.id),
+      currentId,
+    )
+  }, [currentId, scores])
 
   const musicXml = useMemo(() => toMusicXml(score), [score])
 
@@ -415,6 +430,18 @@ export function useEditor() {
     [commit, cursor, score],
   )
 
+  /**
+   * Tempo is part of the score -- printed on the page, written to the file --
+   * so a change goes through commit() and is undoable. One key for the whole
+   * adjustment: nudging 100 to 160 is one step back, not sixty.
+   */
+  const setTempo = useCallback(
+    (tempo: number) => {
+      commit({ ...score, tempo: clampTempo(Math.round(tempo)) }, cursor, 'tempo')
+    },
+    [commit, cursor, score],
+  )
+
   const setKeyFifths = useCallback(
     (keyFifths: number) => {
       commit({ ...score, keyFifths }, cursor)
@@ -652,6 +679,7 @@ export function useEditor() {
     moveMeasure,
     setTime,
     setKeyFifths,
+    setTempo,
     setTitle,
     setMeasureCount,
     scores,

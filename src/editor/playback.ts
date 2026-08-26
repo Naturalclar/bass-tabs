@@ -12,28 +12,19 @@
  * AudioContext; usePlayback.ts is the thin layer that feeds it to Web Audio.
  */
 
-import { DIVISIONS, measureCapacity, ticks, type Score } from './model.ts'
+import { DIVISIONS, clampTempo, measureCapacity, ticks, type Score } from './model.ts'
 import { midiFor } from './tuning.ts'
 
 /** One note to sound. Times are in ticks: DIVISIONS per quarter note. */
 export type PlaybackNote = { midi: number; startTicks: number; durationTicks: number }
 
 /**
- * Tempo is quarter notes per minute whatever the meter -- the one BPM meaning
- * that needs no per-meter rules. It is a playback-only setting: `Score` has no
- * tempo field, and deliberately does not gain one here (that would change the
- * stored shape and the exported file for a knob only the speaker uses).
+ * Tempo lives on the `Score` (see model.ts): it is printed on the page and
+ * written to the file, so playback reads `score.tempo` rather than keeping a
+ * knob of its own.
  */
-export const MIN_BPM = 30
-export const MAX_BPM = 300
-export const DEFAULT_BPM = 100
-
-export function clampBpm(bpm: number): number {
-  return Math.min(Math.max(bpm, MIN_BPM), MAX_BPM)
-}
-
-export function secondsPerTick(bpm: number): number {
-  return 60 / (clampBpm(bpm) * DIVISIONS)
+export function secondsPerTick(tempo: number): number {
+  return 60 / (clampTempo(tempo) * DIVISIONS)
 }
 
 /**

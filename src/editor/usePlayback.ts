@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Score } from './model.ts'
-import { DEFAULT_BPM, clampBpm, schedule, secondsPerTick } from './playback.ts'
+import { schedule, secondsPerTick } from './playback.ts'
 
 /** Hz for a MIDI note number: 69 is A4 at 440 Hz. */
 function frequency(midi: number): number {
@@ -27,7 +27,6 @@ const LEAD_SECONDS = 0.05
  */
 export function usePlayback(score: Score) {
   const [playing, setPlaying] = useState(false)
-  const [bpm, setBpm] = useState(DEFAULT_BPM)
   const context = useRef<AudioContext | null>(null)
   /** The one node this run hangs off the destination by. */
   const run = useRef<AudioNode | null>(null)
@@ -63,7 +62,7 @@ export function usePlayback(score: Score) {
     master.connect(filter)
     filter.connect(ctx.destination)
 
-    const perTick = secondsPerTick(bpm)
+    const perTick = secondsPerTick(score.tempo)
     const first = ctx.currentTime + LEAD_SECONDS
     let lastEnd = first
     for (const note of notes) {
@@ -98,7 +97,7 @@ export function usePlayback(score: Score) {
       () => stop(),
       (lastEnd - ctx.currentTime + 0.1) * 1000,
     )
-  }, [bpm, notes, stop])
+  }, [notes, score.tempo, stop])
 
   // Unmount: silence whatever is sounding and give the audio device back.
   useEffect(
@@ -110,12 +109,8 @@ export function usePlayback(score: Score) {
     [],
   )
 
-  const setBpmClamped = useCallback((next: number) => setBpm(clampBpm(next)), [])
-
   return {
     playing,
-    bpm,
-    setBpm: setBpmClamped,
     canPlay: notes.length > 0,
     play,
     stop,
