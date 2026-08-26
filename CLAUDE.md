@@ -156,7 +156,13 @@ breaking the code and watching the right test fail:
   `.score-page` has a fixed `210mm`, so a print-only measurement passes even while the screen
   layout is broken.
 
-Two traps:
+Three traps:
+
+- A file handed to `setInputFiles` must sit under an **ASCII path**. `testInfo.outputPath()` builds
+  its directory from the test title, and these titles are Japanese — Playwright then attaches
+  nothing, raises nothing, and the change event never fires, which is indistinguishable from a
+  broken handler. `tests/editor.spec.ts` writes import fixtures to a `mkdtempSync` directory instead.
+
 
 - `page.emulateMedia()` outlives navigation. Leaving it set to `'screen'` makes a later
   `page.pdf()` render with screen styles and report wrong page counts — that looks exactly like a

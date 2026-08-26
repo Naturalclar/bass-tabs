@@ -341,6 +341,35 @@ export function useEditor() {
   }, [scores])
 
   /**
+   * Adds scores read from a file, and opens the first of them.
+   *
+   * They are always added, never merged over what is already saved: an import
+   * is someone bringing scores in, and quietly replacing the ones they already
+   * had would be the one mistake there is no undo for. New ids are minted so a
+   * file restored twice cannot collide with itself.
+   */
+  const importScores = useCallback(
+    (incoming: Score[]) => {
+      if (incoming.length === 0) return
+      const added = incoming.map((score) => ({ id: newScoreId(), score }))
+      setLibrary((current) => ({
+        scores: [...current.scores, ...added],
+        currentId: added[0].id,
+      }))
+      for (const entry of added) writeScore(entry.id, entry.score)
+      writeIndex(
+        [...scores.map((entry) => entry.id), ...added.map((entry) => entry.id)],
+        added[0].id,
+      )
+      setCursor({ measure: 0, index: 0 })
+      setPast([])
+      setFuture([])
+      lastKey.current = null
+    },
+    [scores],
+  )
+
+  /**
    * Deletes a score for good -- undo cannot reach it, because the history
    * describes edits inside a score, not the library around it. The UI asks
    * first for that reason. Deleting the last one leaves a fresh empty score, so
@@ -474,6 +503,7 @@ export function useEditor() {
     selectScore,
     addScore,
     deleteScore,
+    importScores,
     undo,
     redo,
     canUndo: past.length > 0,

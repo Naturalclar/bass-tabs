@@ -7,6 +7,8 @@ import { ScoreList } from './components/ScoreList'
 import { useOsmd } from './score/useOsmd'
 import { useEditor, type Cursor } from './editor/useEditor.ts'
 import type { ScoreId } from './editor/storage.ts'
+import { fromBackup, toBackup } from './editor/backup.ts'
+import { fromMusicXml } from './editor/musicxmlImport.ts'
 import { useMidiInput } from './editor/useMidiInput.ts'
 import { NOTE_VALUES, type NoteValue } from './editor/model.ts'
 import { MAX_FRET, STRINGS } from './editor/tuning.ts'
@@ -198,15 +200,70 @@ export default function App() {
     [editor, recordPlacement],
   )
 
-  const handleExport = useCallback(() => {
-    const blob = new Blob([editor.musicXml], { type: 'application/vnd.recordare.musicxml+xml' })
-    const url = URL.createObjectURL(blob)
+  const [importNotice, setImportNotice] = useState<string | null>(null)
+
+  const download = useCallback((text: string, name: string, type: string) => {
+    const url = URL.createObjectURL(new Blob([text], { type }))
     const link = document.createElement('a')
     link.href = url
-    link.download = `${editor.score.title || 'score'}.musicxml`
+    link.download = name
     link.click()
     URL.revokeObjectURL(url)
-  }, [editor.musicXml, editor.score.title])
+  }, [])
+
+  const handleExportAll = useCallback(() => {
+    download(toBackup(editor.scores), 'bass-tabs-library.json', 'application/json')
+  }, [download, editor.scores])
+
+  /**
+   * Takes either a whole library or a single MusicXML score. Both are read the
+   * same way -- validate, then add -- so an unreadable file changes nothing and
+   * says so instead of failing quietly.
+   */
+  const handleImportFile = useCallback(
+    async (file: File) => {
+      const text = await file.text()
+      if (file.name.endsWith('.json')) {
+        const result = fromBackup(text)
+        if (!result.ok) {
+          setImportNotice(
+            result.reason === 'wrong-format'
+              ? 'この JSON は bass-tabs の書き出しではありません'
+              : result.reason === 'wrong-version'
+                ? '対応していない版の書き出しです'
+                : result.reason === 'no-scores'
+                  ? '読める譜面がありませんでした'
+                  : 'ファイルを読めませんでした',
+          )
+          return
+        }
+        editor.importScores(result.scores)
+        setImportNotice(`${result.scores.length} 曲を取り込みました`)
+        return
+      }
+
+      const result = fromMusicXml(text)
+      if (!result.ok) {
+        setImportNotice(
+          result.reason === 'no-tab'
+            ? 'TAB 譜が入っていないので取り込めません（表示は「ファイルを開く」から）'
+            : 'ファイルを読めませんでした',
+        )
+        return
+      }
+      editor.importScores([result.score])
+      setImportNotice('1 曲を取り込みました')
+    },
+    [editor],
+  )
+
+  const handleExport = useCallback(() => {
+    download(
+      editor.musicXml,
+      `${editor.score.title || 'score'}.musicxml`,
+      'application/vnd.recordare.musicxml+xml',
+    )
+  }, [download, editor.musicXml, editor.score.title])
 
   return (
     <>
@@ -225,6 +282,17 @@ export default function App() {
             onSelect={library.select}
             onAdd={library.add}
             onDelete={library.remove}
+            onExportAll={handleExportAll}
+            onImportFile={(file) => {
+              // A rejected promise here would leave the person with no file
+              // imported and nothing said about it.
+              handleImportFile(file).catch((error: unknown) => {
+                setImportNotice(
+                  `ファイルを読めませんでした: ${error instanceof Error ? error.message : String(error)}`,
+                )
+              })
+            }}
+            notice={importNotice}
           />
           <div className="workspace__main">
             <EditorPanel
