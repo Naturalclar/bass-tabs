@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { BASE_PATH } from '../base-path.ts'
 import { pdfPageCount, pdfPageSizeMm } from './pdf.ts'
 import { schedule, secondsPerTick } from '../src/editor/playback.ts'
+import { appendRun, moveBeat, place, stepCursor, toggleString, withTime } from '../src/editor/edit.ts'
 import {
   DIVISIONS,
   type Entry,
@@ -1797,6 +1798,107 @@ test.describe('dark colour scheme', () => {
       // 4.5:1 is the WCAG AA threshold for body text.
       expect(ratio, `${selector} contrast`).toBeGreaterThanOrEqual(4.5)
     }
+  })
+})
+
+/**
+ * 編集の純関数 (edit.ts)。スコアの変形そのものはここで React 抜きで検査する。
+ * フックがこれらを commit に繋いでいることは、上の e2e（クリック・キーボード・
+ * 小節をまたぐ入力・和音）が実画面で踏んでいる。
+ */
+test.describe('編集の純関数', () => {
+  const q = (fret: number, string = 4): Entry => ({
+    kind: 'note',
+    notes: [{ string, fret }],
+    value: 4,
+    dotted: false,
+  })
+  const scoreOf = (
+    measures: Entry[][],
+    time: TimeSignature = { beats: 4, beatType: 4 },
+  ): Score => ({ title: '', keyFifths: 0, time, measures })
+
+  test('place は埋まった小節から次の空きへ流し、末尾では小節を増やす', () => {
+    const full = [q(1), q(1), q(1), q(1)]
+    // 2 小節目に空きがある: そこへ流れ、置かれた場所が slot で返る
+    const spilled = place(scoreOf([full, [q(2)]]), q(5), { measure: 0, index: 4 })
+    expect(spilled?.slot).toEqual({ measure: 1, index: 1 })
+    // 空きのある小節が無い: 末尾に小節が増え、増えた小節がその音を持つ
+    const grown = place(scoreOf([full]), q(5), { measure: 0, index: 4 })
+    expect(grown?.score.measures).toHaveLength(2)
+    expect(grown?.slot).toEqual({ measure: 1, index: 0 })
+    // すでにある音の打ち替えは流れない: 収まらなければ書かない
+    expect(place(scoreOf([full]), { ...q(5), value: 2 }, { measure: 0, index: 0 })).toBeNull()
+  })
+
+  test('place は 64 小節を超えて増やさない', () => {
+    const whole: Entry = { kind: 'note', notes: [{ string: 4, fret: 0 }], value: 1, dotted: false }
+    const full = scoreOf(Array.from({ length: 64 }, () => [whole]))
+    expect(place(full, q(0), { measure: 63, index: 1 })).toBeNull()
+  })
+
+  test('toggleString は同じ列の弦を出し入れし、最後の 1 音は休符を残す', () => {
+    const one = scoreOf([[q(3, 4)]])
+    const added = toggleString(one, { measure: 0, index: 0 }, 3, 5)
+    // 追加された運指は弦番号順に並ぶ
+    expect(added?.added).toBe(true)
+    expect(added?.score.measures[0][0]).toEqual({
+      kind: 'note',
+      notes: [
+        { string: 3, fret: 5 },
+        { string: 4, fret: 3 },
+      ],
+      value: 4,
+      dotted: false,
+    })
+    const removed = toggleString(added!.score, { measure: 0, index: 0 }, 3, 0)
+    expect(removed?.added).toBe(false)
+    // 最後の 1 音を外すと、拍を保ったまま休符が残る
+    const rested = toggleString(removed!.score, { measure: 0, index: 0 }, 4, 0)
+    expect(rested?.score.measures[0][0]).toEqual({ kind: 'rest', value: 4, dotted: false })
+    // 書かれていない列には toggle するものが無い（呼び出し側が新しく置く）
+    expect(toggleString(one, { measure: 0, index: 1 }, 3, 0)).toBeNull()
+  })
+
+  test('withTime は縮んだ拍子に収まらない音を末尾から落とす', () => {
+    const trimmed = withTime(scoreOf([[q(1), q(2), q(3), q(4)]]), { beats: 3, beatType: 4 })
+    expect(trimmed.time).toEqual({ beats: 3, beatType: 4 })
+    expect(trimmed.measures[0]).toHaveLength(3)
+  })
+
+  test('appendRun は使われた最後の小節から詰め、末尾の空小節を持ち越さない', () => {
+    // 空の 2 小節は追記点であって、後ろに残す内容ではない
+    const appended = appendRun(scoreOf([[q(1), q(2)], [], []]), [q(3), q(4), q(5)])
+    expect(appended.added).toBe(3)
+    expect(appended.score.measures).toHaveLength(2)
+    expect(appended.score.measures[0]).toHaveLength(4)
+    expect(appended.score.measures[1]).toHaveLength(1)
+  })
+
+  test('stepCursor は小節線をまたぎ、両端で止まる', () => {
+    const score = scoreOf([[q(1)], [q(2)]])
+    expect(stepCursor(score, { measure: 0, index: 1 }, 1)).toEqual({ measure: 1, index: 0 })
+    expect(stepCursor(score, { measure: 1, index: 0 }, -1)).toEqual({ measure: 0, index: 1 })
+    expect(stepCursor(score, { measure: 0, index: 0 }, -1)).toEqual({ measure: 0, index: 0 })
+    expect(stepCursor(score, { measure: 1, index: 1 }, 1)).toEqual({ measure: 1, index: 1 })
+  })
+
+  test('moveBeat は和音全体を動かし、動けない音が 1 つでもあれば動かさない', () => {
+    const chord: Entry = {
+      kind: 'note',
+      notes: [
+        { string: 3, fret: 2 },
+        { string: 4, fret: 0 }, // 開放 E: これ以上は下げられない
+      ],
+      value: 4,
+      dotted: false,
+    }
+    expect(moveBeat(scoreOf([[chord]]), { measure: 0, index: 0 }, { semitones: -1 })).toBeNull()
+    const up = moveBeat(scoreOf([[chord]]), { measure: 0, index: 0 }, { semitones: 1 })
+    expect(up?.landed).toEqual([
+      { string: 3, fret: 3 },
+      { string: 4, fret: 1 },
+    ])
   })
 })
 
