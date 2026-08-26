@@ -188,6 +188,26 @@ test('a click cannot overfill the measure either', async ({ page }) => {
 })
 
 /**
+ * The remaining-beats readout counts in the meter's own unit. Dividing by
+ * DIVISIONS alone is quarter-note arithmetic: right for x/4 metres, and off
+ * by half in 6/8, where an empty bar was shown as 残り 3 拍 while six eighth
+ * notes still fit.
+ */
+test('「この小節の残り」は拍子の単位で数える', async ({ page }) => {
+  await openEditor(page)
+  const remaining = page.locator('.editor-remaining')
+  await expect(remaining).toContainText('この小節の残り: 4 拍')
+
+  await page.getByLabel('拍子').selectOption('6/8')
+  await expect(remaining).toContainText('この小節の残り: 6 拍')
+
+  await page.locator('.tab-editor').focus()
+  await page.keyboard.press('e')
+  await page.keyboard.press('5')
+  await expect(remaining).toContainText('この小節の残り: 5 拍')
+})
+
+/**
  * A bar that is full has to hand the keystroke on rather than swallow it:
  * playing a phrase in is one run of keys, and stopping dead at a bar line --
  * with no message and nothing written -- reads as the editor being broken.

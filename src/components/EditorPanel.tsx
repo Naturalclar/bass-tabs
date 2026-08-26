@@ -223,7 +223,11 @@ export function EditorPanel(props: Props) {
           </button>
         </div>
 
-        <span className="editor-remaining">この小節の残り: {props.remaining / DIVISIONS} 拍</span>
+        <span className="editor-remaining">
+          {/* In the meter's own beat unit: an empty 6/8 bar has 6 left, not
+              the 3 that quarter-note (DIVISIONS) arithmetic would show. */}
+          この小節の残り: {props.remaining / ((DIVISIONS * 4) / props.time.beatType)} 拍
+        </span>
       </div>
 
       <div className="editor-row">
