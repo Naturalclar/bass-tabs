@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Toolbar } from './components/Toolbar'
 import { ScoreView } from './components/ScoreView'
 import { EditorPanel } from './components/EditorPanel'
 import { TabEditor } from './components/TabEditor'
+import { ScoreList } from './components/ScoreList'
 import { useOsmd } from './score/useOsmd'
 import { useEditor, type Cursor } from './editor/useEditor.ts'
+import type { ScoreId } from './editor/storage.ts'
 import { useMidiInput } from './editor/useMidiInput.ts'
 import { NOTE_VALUES, type NoteValue } from './editor/model.ts'
 import { MAX_FRET, STRINGS } from './editor/tuning.ts'
@@ -62,6 +64,29 @@ export default function App() {
     lastFret.current = null
     editor.redo()
   }, [editor])
+
+  /**
+   * Switching scores also ends the run of digits. The run remembers a position
+   * in the score being left, and a digit typed just after a switch would
+   * otherwise try to amend that position in the score that just opened.
+   */
+  const library = useMemo(
+    () => ({
+      select: (id: ScoreId) => {
+        lastFret.current = null
+        editor.selectScore(id)
+      },
+      add: () => {
+        lastFret.current = null
+        editor.addScore()
+      },
+      remove: (id: ScoreId) => {
+        lastFret.current = null
+        editor.deleteScore(id)
+      },
+    }),
+    [editor],
+  )
 
   useEffect(() => {
     if (mode !== 'edit') return
@@ -193,8 +218,16 @@ export default function App() {
         onPrint={() => window.print()}
       />
       {mode === 'edit' && (
-        <>
-          <EditorPanel
+        <div className="workspace">
+          <ScoreList
+            scores={editor.scores}
+            currentId={editor.currentId}
+            onSelect={library.select}
+            onAdd={library.add}
+            onDelete={library.remove}
+          />
+          <div className="workspace__main">
+            <EditorPanel
             title={editor.score.title}
             time={editor.score.time}
             keyFifths={editor.score.keyFifths}
@@ -219,18 +252,18 @@ export default function App() {
             canRedo={editor.canRedo}
             onConnectMidi={() => void midi.connect()}
             onExport={handleExport}
-            onReset={editor.reset}
           />
-          <TabEditor
-            measures={editor.score.measures}
-            time={editor.score.time}
-            cursor={editor.cursor}
-            onPlace={(at, stringNumber) =>
-              recordPlacement(editor.putNote(stringNumber, editor.fret, at), null)
-            }
-            onKeyDown={handleKeyDown}
-          />
-        </>
+            <TabEditor
+              measures={editor.score.measures}
+              time={editor.score.time}
+              cursor={editor.cursor}
+              onPlace={(at, stringNumber) =>
+                recordPlacement(editor.putNote(stringNumber, editor.fret, at), null)
+              }
+              onKeyDown={handleKeyDown}
+            />
+          </div>
+        </div>
       )}
       <ScoreView containerRef={containerRef} status={status} />
     </>

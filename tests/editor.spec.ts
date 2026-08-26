@@ -179,25 +179,63 @@ test('a click cannot overfill the measure either', async ({ page }) => {
  * blank page.
  */
 test.describe('restoring a saved score', () => {
-  const BROKEN: { label: string; stored: string }[] = [
-    { label: '拍子が欠けている', stored: '{"title":"x","keyFifths":0,"measures":[[]]}' },
-    {
-      label: '音の中身が壊れている',
-      stored:
-        '{"title":"x","keyFifths":0,"time":{"beats":4,"beatType":4},"measures":[[{"kind":"note"}]]}',
+  const VERSION = 2
+  const seed = (page: Page, entries: Record<string, unknown>) =>
+    page.addInitScript((values) => {
+      for (const [key, value] of Object.entries(values)) {
+        localStorage.setItem(key, JSON.stringify(value))
+      }
+    }, entries)
+
+  const scoreOf = (title: string, fret: number) => ({
+    version: VERSION,
+    score: {
+      title,
+      keyFifths: 0,
+      time: { beats: 4, beatType: 4 },
+      measures: [[{ kind: 'note', string: 4, fret, value: 4, dotted: false }], [], [], []],
     },
-    { label: 'JSON ですらない', stored: 'not json at all' },
-    {
-      label: '知らない版で書かれている',
-      stored: '{"version":999,"score":{"title":"x","keyFifths":0,"time":{"beats":4,"beatType":4},"measures":[[]]}}',
-    },
+  })
+
+  test('保存した譜面が一覧ごと戻る', async ({ page }) => {
+    await seed(page, {
+      'bass-tabs:index': { version: VERSION, ids: ['a', 'b'], currentId: 'b' },
+      'bass-tabs:score:a': scoreOf('one', 3),
+      'bass-tabs:score:b': scoreOf('two', 7),
+    })
+
+    await openEditor(page)
+
+    await expect(page.locator('.score-row')).toHaveCount(2)
+    // The score that was open is the one that opens again.
+    await expect(page.locator('.tab-cell--note')).toHaveText(['7'])
+    await expect(page.getByRole('status')).toContainText('two')
+  })
+
+  test('中身が壊れた譜面は落として、残りは開ける', async ({ page }) => {
+    await seed(page, {
+      'bass-tabs:index': { version: VERSION, ids: ['a', 'broken'], currentId: 'broken' },
+      'bass-tabs:score:a': scoreOf('one', 3),
+      'bass-tabs:score:broken': { version: VERSION, score: { title: 'x', measures: [[]] } },
+    })
+
+    await openEditor(page)
+
+    await expect(page.locator('.score-row')).toHaveCount(1)
+    await expect(page.locator('.tab-cell--note')).toHaveText(['3'])
+  })
+
+  const BROKEN: { label: string; index: unknown }[] = [
+    { label: '目次が JSON ですらない', index: 'not json at all' },
+    { label: '目次が知らない版', index: { version: 999, ids: ['a'], currentId: 'a' } },
+    { label: '目次の中身が壊れている', index: { version: VERSION, ids: 'nope' } },
   ]
 
-  for (const { label, stored } of BROKEN) {
-    test(`${label}保存データでも起動して空の譜面から始まる`, async ({ page }) => {
+  for (const { label, index } of BROKEN) {
+    test(`${label}場合でも起動して空の譜面から始まる`, async ({ page }) => {
       await page.addInitScript((value) => {
-        localStorage.setItem('bass-tabs:score', value)
-      }, stored)
+        localStorage.setItem('bass-tabs:index', typeof value === 'string' ? value : JSON.stringify(value))
+      }, index)
 
       await openEditor(page)
 
@@ -208,25 +246,85 @@ test.describe('restoring a saved score', () => {
       await expect(page.locator('svg.score-page')).toHaveCount(1)
     })
   }
+})
 
-  test('版の無い古い保存データは読み直せる', async ({ page }) => {
-    // What shipped before the envelope existed: a bare Score.
-    await page.addInitScript(() => {
-      localStorage.setItem(
-        'bass-tabs:score',
-        JSON.stringify({
-          title: 'legacy',
-          keyFifths: 0,
-          time: { beats: 4, beatType: 4 },
-          measures: [[{ kind: 'note', string: 4, fret: 3, value: 4, dotted: false }], [], [], []],
-        }),
-      )
-    })
-
+/**
+ * The library around the scores, as opposed to the notes inside one. Undo does
+ * not reach these: its history describes edits within a score.
+ */
+test.describe('譜面の一覧', () => {
+  test('譜面を足しても既にあるものは残る', async ({ page }) => {
     await openEditor(page)
+    await fillFirstMeasure(page, 'E')
+    await expect(page.locator('.score-row')).toHaveCount(1)
 
+    await page.getByRole('button', { name: '＋ 追加' }).click()
+
+    await expect(page.locator('.score-row')).toHaveCount(2)
+    // The new one opens empty; the first is untouched behind it.
+    await expect(page.locator('.tab-cell--note')).toHaveCount(0)
+    await page.locator('.score-row__open').first().click()
+    await expect(page.locator('.tab-cell--note')).toHaveCount(4)
+  })
+
+  test('切り替えて戻しても内容が保たれる', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('7')
+
+    await page.getByRole('button', { name: '＋ 追加' }).click()
+    // Wait for the new score to actually be the open one: typing before the
+    // switch has landed would write into the score being left.
+    await expect(page.locator('.score-row').last()).toHaveClass(/score-row--current/)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('3')
     await expect(page.locator('.tab-cell--note')).toHaveText(['3'])
-    await expect(page.getByRole('status')).toContainText('legacy')
+
+    await page.locator('.score-row__open').first().click()
+    await expect(page.locator('.tab-cell--note')).toHaveText(['7'])
+    await page.locator('.score-row__open').last().click()
+    await expect(page.locator('.tab-cell--note')).toHaveText(['3'])
+  })
+
+  test('リロードしても一覧と開いていた譜面が残る', async ({ page }) => {
+    await openEditor(page)
+    await page.getByRole('button', { name: '＋ 追加' }).click()
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('9')
+    await expect(page.locator('.tab-cell--note')).toHaveText(['9'])
+
+    await page.reload()
+    await page.getByRole('button', { name: '譜面を作る' }).click()
+
+    await expect(page.locator('.score-row')).toHaveCount(2)
+    await expect(page.locator('.tab-cell--note')).toHaveText(['9'])
+  })
+
+  test('削除は確認を挟み、断れば消えない', async ({ page }) => {
+    await openEditor(page)
+    await page.getByRole('button', { name: '＋ 追加' }).click()
+    await expect(page.locator('.score-row')).toHaveCount(2)
+
+    page.once('dialog', (dialog) => void dialog.dismiss())
+    await page.locator('.score-row__delete').first().click()
+    await expect(page.locator('.score-row')).toHaveCount(2)
+
+    page.once('dialog', (dialog) => void dialog.accept())
+    await page.locator('.score-row__delete').first().click()
+    await expect(page.locator('.score-row')).toHaveCount(1)
+  })
+
+  test('最後の 1 つを消しても空の譜面が残る', async ({ page }) => {
+    await openEditor(page)
+    await fillFirstMeasure(page, 'E')
+
+    page.once('dialog', (dialog) => void dialog.accept())
+    await page.locator('.score-row__delete').first().click()
+
+    // Always something open, so the editor never has nothing to edit.
+    await expect(page.locator('.score-row')).toHaveCount(1)
+    await expect(page.locator('.tab-cell--note')).toHaveCount(0)
+    await expect(page.locator('svg.score-page')).toHaveCount(1)
   })
 })
 
@@ -385,16 +483,6 @@ test.describe('取り消しとやり直し', () => {
     await expect(page.locator('.tab-cell--note')).toHaveCount(1)
   })
 
-  test('新規も取り消せる', async ({ page }) => {
-    await openEditor(page)
-    await page.getByRole('button', { name: '1 小節目 1 番目 E 弦' }).click()
-    await page.getByRole('button', { name: '新規' }).click()
-    await expect(page.locator('.tab-cell--note')).toHaveCount(0)
-
-    await page.locator('.tab-editor').focus()
-    await undo(page)
-    await expect(page.locator('.tab-cell--note')).toHaveCount(1)
-  })
 })
 
 /**

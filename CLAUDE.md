@@ -82,11 +82,20 @@ its snapshots — so a new mutation must call `commit()` rather than `setScore` 
 be invisible to undo. Passing the same `CommitKey` as the previous commit extends that step instead
 of adding one; that is how a typed title or a two-digit fret stays a single undo.
 
-`src/editor/storage.ts` owns the one saved score. Everything the app reads off a restored score is
-validated there, because the stored value is the only input nothing type-checks — it was written by
-whatever version of the code ran last, and a shape the app cannot read fails on *every* reload with
-no way back from the UI. Change `Score` in a way the validator would still accept (a renamed field,
-a changed unit) and bump `STORAGE_VERSION`.
+`src/editor/storage.ts` owns the saved scores: one key per score plus an index naming them and
+remembering which was open. Per-score keys are what let an edit write only the score being edited —
+the app saves on every keystroke, and rewriting the whole library that often would get slower with
+every score added. The index holds no titles on purpose; a title would then live in two places and
+need keeping in step on every keystroke, so the library is read in full at startup instead and
+served from memory after that.
+
+Everything the app reads off a restored score is validated there, because the stored value is the
+only input nothing type-checks — it was written by whatever version of the code ran last, and a
+shape the app cannot read fails on *every* reload with no way back from the UI. Change `Score` in a
+way the validator would still accept (a renamed field, a changed unit) and bump `STORAGE_VERSION`.
+
+Anything that remembers a position in the score — the digit run in `App.tsx`, the undo history —
+has to be cleared when the open score changes, or it will address the score that was left.
 
 MusicXML's two numbering schemes run in opposite directions and are the easiest thing to break:
 `<string>` counts from the highest-pitched string (G is 1), `<staff-tuning line>` counts from the
