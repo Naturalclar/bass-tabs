@@ -5,7 +5,8 @@
  * them from, so the recognition layer can be tested and swapped independently.
  */
 
-export type TabColumnRegion = {
+/** One fret number to read: a digit group on one string. */
+export type TabDigitRegion = {
   /** String number the digits sit on (1 = G, matching the model). */
   string: number
   /** How many digit glyphs the group holds. */
@@ -17,6 +18,14 @@ export type TabColumnRegion = {
   y0: number
   x1: number
   y1: number
+}
+
+/**
+ * One beat: the digit groups sharing an x position. One part is a single
+ * note; parts on several strings at once are a chord.
+ */
+export type TabColumnRegion = {
+  parts: TabDigitRegion[]
 }
 
 export type TabImageAnalysis =
@@ -32,10 +41,10 @@ export type TabImageAnalysis =
       inkOriginal: Uint8Array
       /** Connected-component label per pixel, -1 where the mask is empty. */
       labels: Int32Array
-      /** Digit groups left to right, each on exactly one string. */
+      /** Beats left to right; a column with several parts is a chord. */
       columns: TabColumnRegion[]
     }
-  | { ok: false; reason: 'no-lanes' | 'chord' | 'no-notes' }
+  | { ok: false; reason: 'no-lanes' | 'no-notes' }
 
 const LANES = 4
 
@@ -383,21 +392,25 @@ export function analyzeTabImage(image: ImageData): TabImageAnalysis {
 
   const columns: TabColumnRegion[] = []
   for (const cluster of clusters) {
-    // Two strings sounding at once is a chord, which the model cannot hold;
-    // refusing beats importing something that looks like the tab but is not.
-    if (new Set(cluster.map((glyph) => glyph.lane)).size > 1) {
-      return { ok: false, reason: 'chord' }
-    }
+    // Glyphs sharing an x position but sitting on different strings are one
+    // beat played on several strings -- a chord. Each string's digits are
+    // still their own OCR crop; only the timing is shared.
+    const lanesHere = [...new Set(cluster.map((glyph) => glyph.lane))].sort((a, b) => a - b)
     columns.push({
-      // Lanes are numbered from the top of the staff, and so are strings:
-      // the top tab line is G, string 1.
-      string: cluster[0].lane + 1,
-      glyphs: cluster.length,
-      labels: cluster.flatMap((glyph) => glyph.labels),
-      x0: Math.min(...cluster.map((glyph) => glyph.x0)),
-      y0: Math.min(...cluster.map((glyph) => glyph.y0)),
-      x1: Math.max(...cluster.map((glyph) => glyph.x1)),
-      y1: Math.max(...cluster.map((glyph) => glyph.y1)),
+      parts: lanesHere.map((lane) => {
+        const part = cluster.filter((glyph) => glyph.lane === lane)
+        return {
+          // Lanes are numbered from the top of the staff, and so are strings:
+          // the top tab line is G, string 1.
+          string: lane + 1,
+          glyphs: part.length,
+          labels: part.flatMap((glyph) => glyph.labels),
+          x0: Math.min(...part.map((glyph) => glyph.x0)),
+          y0: Math.min(...part.map((glyph) => glyph.y0)),
+          x1: Math.max(...part.map((glyph) => glyph.x1)),
+          y1: Math.max(...part.map((glyph) => glyph.y1)),
+        }
+      }),
     })
   }
 

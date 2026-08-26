@@ -61,32 +61,7 @@ function padded(entries: Entry[], capacity: number): Entry[] {
 
 function noteXml(entry: Entry, staff: 1 | 2, keyFifths: number): string {
   const duration = ticks(entry.value, entry.dotted)
-  const head =
-    entry.kind === 'rest'
-      ? '        <rest/>\n'
-      : (() => {
-          const { step, alter, octave } = pitchFor(
-            midiFor(entry.string, entry.fret) + WRITTEN_OCTAVE_SHIFT,
-            keyFifths,
-          )
-          return (
-            '        <pitch>\n' +
-            `          <step>${step}</step>\n` +
-            (alter === 0 ? '' : `          <alter>${alter}</alter>\n`) +
-            `          <octave>${octave}</octave>\n` +
-            '        </pitch>\n'
-          )
-        })()
-
-  const technical =
-    entry.kind === 'note' && staff === 2
-      ? `        <notations><technical><string>${entry.string}</string>` +
-        `<fret>${entry.fret}</fret></technical></notations>\n`
-      : ''
-
-  return (
-    '      <note>\n' +
-    head +
+  const tail = (technical: string) =>
     `        <duration>${duration}</duration>\n` +
     '        <voice>1</voice>\n' +
     `        <type>${TYPE_NAMES[entry.value]}</type>\n` +
@@ -94,7 +69,36 @@ function noteXml(entry: Entry, staff: 1 | 2, keyFifths: number): string {
     `        <staff>${staff}</staff>\n` +
     technical +
     '      </note>\n'
-  )
+
+  if (entry.kind === 'rest') return '      <note>\n        <rest/>\n' + tail('')
+
+  // A chord is the same <note> element once per string, every one after the
+  // first opening with <chord/> so it shares the first one's moment instead
+  // of advancing time. Each carries its own duration all the same -- that is
+  // how the reference sample (and the spec) writes it.
+  return entry.notes
+    .map((fingering, index) => {
+      const { step, alter, octave } = pitchFor(
+        midiFor(fingering.string, fingering.fret) + WRITTEN_OCTAVE_SHIFT,
+        keyFifths,
+      )
+      const technical =
+        staff === 2
+          ? `        <notations><technical><string>${fingering.string}</string>` +
+            `<fret>${fingering.fret}</fret></technical></notations>\n`
+          : ''
+      return (
+        '      <note>\n' +
+        (index > 0 ? '        <chord/>\n' : '') +
+        '        <pitch>\n' +
+        `          <step>${step}</step>\n` +
+        (alter === 0 ? '' : `          <alter>${alter}</alter>\n`) +
+        `          <octave>${octave}</octave>\n` +
+        '        </pitch>\n' +
+        tail(technical)
+      )
+    })
+    .join('')
 }
 
 function attributesXml(score: Score): string {

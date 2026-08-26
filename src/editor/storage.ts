@@ -36,7 +36,7 @@ const SCORE_KEY_PREFIX = 'bass-tabs:score:'
  * changes in a way the validator below would still accept -- a renamed field
  * with a compatible type, a changed unit, a changed meaning.
  */
-const STORAGE_VERSION = 2
+const STORAGE_VERSION = 3
 
 const BEAT_TYPES = [1, 2, 4, 8, 16]
 
@@ -56,13 +56,8 @@ function isTimeSignature(value: unknown): value is TimeSignature {
   )
 }
 
-function isEntry(value: unknown): value is Entry {
+function isFingering(value: unknown): value is { string: number; fret: number } {
   if (!isRecord(value)) return false
-  if (typeof value.dotted !== 'boolean') return false
-  if (typeof value.value !== 'number') return false
-  if (!(NOTE_VALUES as readonly number[]).includes(value.value)) return false
-  if (value.kind === 'rest') return true
-  if (value.kind !== 'note') return false
   // An unknown string number reaches `stringByNumber`, which throws by design.
   if (!STRINGS.some((string) => string.number === value.string)) return false
   return (
@@ -71,6 +66,20 @@ function isEntry(value: unknown): value is Entry {
     value.fret >= 0 &&
     value.fret <= MAX_FRET
   )
+}
+
+function isEntry(value: unknown): value is Entry {
+  if (!isRecord(value)) return false
+  if (typeof value.dotted !== 'boolean') return false
+  if (typeof value.value !== 'number') return false
+  if (!(NOTE_VALUES as readonly number[]).includes(value.value)) return false
+  if (value.kind === 'rest') return true
+  if (value.kind !== 'note') return false
+  if (!Array.isArray(value.notes) || value.notes.length === 0) return false
+  if (!value.notes.every((note) => isFingering(note))) return false
+  // The same string cannot sound twice in one beat.
+  return new Set(value.notes.map((note) => (note as { string: number }).string)).size ===
+    value.notes.length
 }
 
 export function isScore(value: unknown): value is Score {
@@ -115,9 +124,41 @@ function write(key: string, value: unknown): void {
   }
 }
 
+/**
+ * Version 2 stored a single-note shape (`string`/`fret` on the entry itself);
+ * version 3 holds a `notes` array so a beat can be a chord. The lift is
+ * mechanical, and people already have scores saved -- discarding them over a
+ * field move would be the exact silent loss this module exists to prevent.
+ */
+function fromVersion2(value: unknown): unknown {
+  if (!isRecord(value) || !Array.isArray(value.measures)) return value
+  return {
+    ...value,
+    measures: value.measures.map((measure) =>
+      Array.isArray(measure)
+        ? measure.map((entry) =>
+            isRecord(entry) && entry.kind === 'note'
+              ? {
+                  kind: 'note',
+                  notes: [{ string: entry.string, fret: entry.fret }],
+                  value: entry.value,
+                  dotted: entry.dotted,
+                }
+              : entry,
+          )
+        : measure,
+    ),
+  }
+}
+
 function readScore(id: ScoreId): Score | null {
   const parsed = read(SCORE_KEY_PREFIX + id)
-  if (!isRecord(parsed) || parsed.version !== STORAGE_VERSION) return null
+  if (!isRecord(parsed)) return null
+  if (parsed.version === 2) {
+    const lifted = fromVersion2(parsed.score)
+    return isScore(lifted) ? lifted : null
+  }
+  if (parsed.version !== STORAGE_VERSION) return null
   return isScore(parsed.score) ? parsed.score : null
 }
 
@@ -129,7 +170,11 @@ function readScore(id: ScoreId): Score | null {
  */
 export function readLibrary(): Library {
   const parsed = read(INDEX_KEY)
-  if (!isRecord(parsed) || parsed.version !== STORAGE_VERSION) return { scores: [], currentId: null }
+  // The index's own shape has not changed since version 2, and it is the
+  // door to the migratable scores: refusing it would orphan them all.
+  if (!isRecord(parsed) || (parsed.version !== STORAGE_VERSION && parsed.version !== 2)) {
+    return { scores: [], currentId: null }
+  }
   const ids = Array.isArray(parsed.ids) ? parsed.ids.filter((id) => typeof id === 'string') : []
 
   const scores: StoredScore[] = []

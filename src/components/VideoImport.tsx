@@ -123,9 +123,7 @@ export function VideoImport({ onAppend }: Props) {
         setNotice(
           result.reason === 'no-lanes'
             ? '4 本の弦の線が見つかりませんでした（タブ譜が画面に映っているか確認してください）'
-            : result.reason === 'chord'
-              ? '同じ位置に複数の弦の数字があるので読み取れません（和音は持てないため）'
-              : '弦の線の上に数字が見つかりませんでした',
+            : '弦の線の上に数字が見つかりませんでした',
         )
         return
       }

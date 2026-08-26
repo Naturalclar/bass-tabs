@@ -62,7 +62,10 @@ export function TabEditor({ measures, time, cursor, onPlace, onKeyDown }: Props)
                 >
                   <span className="tab-column__value">{entry ? entryLabel(entry) : '+'}</span>
                   {STRINGS.map((string) => {
-                    const here = entry?.kind === 'note' && entry.string === string.number
+                    const here =
+                      entry?.kind === 'note'
+                        ? entry.notes.find((note) => note.string === string.number)
+                        : undefined
                     return (
                       <button
                         type="button"
@@ -71,7 +74,7 @@ export function TabEditor({ measures, time, cursor, onPlace, onKeyDown }: Props)
                         aria-label={`${measureIndex + 1} 小節目 ${index + 1} 番目 ${string.label} 弦`}
                         onClick={() => onPlace({ measure: measureIndex, index }, string.number)}
                       >
-                        {here ? entry.fret : entry?.kind === 'rest' ? '' : '−'}
+                        {here ? here.fret : entry?.kind === 'rest' ? '' : '−'}
                       </button>
                     )
                   })}

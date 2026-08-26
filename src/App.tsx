@@ -62,14 +62,15 @@ export default function App() {
   }, [editor.currentId, mode, stopPlayback])
 
   /**
-   * The note the last placement wrote, so a following digit edits it rather
-   * than starting a new note after it.
+   * The note the last placement wrote -- its slot and, now that a beat can be
+   * a chord, which string of it -- so a following digit edits that note
+   * rather than starting a new one after it.
    *
    * `digits` is what a further digit appends to, and is null after a click:
    * a click carries over the previous fret, so appending to it would read the
    * first digit typed as a second digit of a number nobody entered.
    */
-  const lastFret = useRef<{ at: Cursor; digits: string | null; time: number } | null>(null)
+  const lastFret = useRef<{ at: Cursor; string: number; digits: string | null; time: number } | null>(null)
 
   const handleUndo = useCallback(() => {
     // The slot the current run of digits was amending may not exist after a
@@ -132,9 +133,12 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [handleRedo, handleUndo, mode])
 
-  const recordPlacement = useCallback((at: Cursor | null, digits: string | null) => {
-    lastFret.current = at ? { at, digits, time: Date.now() } : null
-  }, [])
+  const recordPlacement = useCallback(
+    (placed: { at: Cursor; string: number } | null, digits: string | null) => {
+      lastFret.current = placed ? { ...placed, digits, time: Date.now() } : null
+    },
+    [],
+  )
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
@@ -159,8 +163,8 @@ export default function App() {
           const digits = base + key
           const fret = Number(digits)
           if (base !== '0' && fret <= MAX_FRET) {
-            editor.setFretAt(previous.at, fret)
-            lastFret.current = { at: previous.at, digits, time: now }
+            editor.setFretAt(previous.at, previous.string, fret)
+            lastFret.current = { ...previous, digits, time: now }
             return
           }
         }
@@ -259,13 +263,11 @@ export default function App() {
           setImportNotice(
             result.reason === 'no-lanes'
               ? '4 本の弦の線が見つかりませんでした'
-              : result.reason === 'chord'
-                ? '同じ位置に複数の弦の数字があるので取り込めません（和音は持てないため）'
-                : result.reason === 'no-notes'
-                  ? '弦の線の上に数字が見つかりませんでした'
-                  : result.reason === 'too-long'
-                    ? `小節が多すぎて取り込めません（上限 ${MAX_MEASURES} 小節）`
-                    : '画像を読めませんでした',
+              : result.reason === 'no-notes'
+                ? '弦の線の上に数字が見つかりませんでした'
+                : result.reason === 'too-long'
+                  ? `小節が多すぎて取り込めません（上限 ${MAX_MEASURES} 小節）`
+                  : '画像を読めませんでした',
           )
           return
         }
@@ -304,7 +306,7 @@ export default function App() {
           result.reason === 'no-tab'
             ? 'TAB 譜が入っていないので取り込めません（表示は「ファイルを開く」から）'
             : result.reason === 'unsupported'
-              ? '和音・タイ・装飾音が入っているので取り込めません（表示は「ファイルを開く」から）'
+              ? 'タイ・装飾音が入っているので取り込めません（表示は「ファイルを開く」から）'
               : result.reason === 'too-long'
                 ? `小節が多すぎて取り込めません（上限 ${MAX_MEASURES} 小節）`
                 : result.reason === 'overfull'
@@ -398,7 +400,7 @@ export default function App() {
               time={editor.score.time}
               cursor={editor.cursor}
               onPlace={(at, stringNumber) =>
-                recordPlacement(editor.putNote(stringNumber, editor.fret, at), null)
+                recordPlacement(editor.toggleNoteAt(at, stringNumber), null)
               }
               onKeyDown={handleKeyDown}
             />
