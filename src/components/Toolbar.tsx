@@ -44,6 +44,14 @@ export function Toolbar({ status, mode, onMode, onPickFile, onPrint }: Props) {
       >
         譜面を作る
       </button>
+      <button
+        type="button"
+        className={`button${mode === 'video' ? ' button--on' : ''}`}
+        aria-pressed={mode === 'video'}
+        onClick={() => onMode(mode === 'video' ? 'edit' : 'video')}
+      >
+        動画から取り込む
+      </button>
       <label className="button" htmlFor={inputId}>
         ファイルを開く
         <input

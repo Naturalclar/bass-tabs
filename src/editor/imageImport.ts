@@ -108,61 +108,82 @@ function intoMeasures(entries: Entry[], score: Omit<Score, 'measures'>): Entry[]
   return measures
 }
 
-export async function fromTabImage(file: File, title: string): Promise<ImageImport> {
-  const image = await imageDataOf(file)
-  if (!image) return { ok: false, reason: 'unreadable' }
+export type TabEntriesResult =
+  | { ok: true; entries: Entry[]; unread: number }
+  | { ok: false; reason: 'no-lanes' | 'chord' | 'no-notes' }
 
-  const analysis = analyzeTabImage(image)
-  if (!analysis.ok) return { ok: false, reason: analysis.reason }
+/**
+ * One OCR worker for the whole session, created on first use. A video-mode
+ * capture reads every few seconds; re-downloading megabytes of engine for
+ * each would make the wait be mostly setup.
+ */
+let sharedWorker: Promise<import('tesseract.js').Worker> | null = null
 
-  // Loaded on demand: the OCR engine is megabytes, and most visits never
-  // import an image.
-  const { createWorker, PSM } = await import('tesseract.js')
-  const worker = await createWorker('eng', 1, {
-    workerPath: `${OCR_BASE}worker.min.js`,
-    corePath: `${OCR_BASE}tesseract-core-simd-lstm.wasm.js`,
-    langPath: OCR_BASE,
-  })
-
-  let entries: Entry[]
-  let unread = 0
-  try {
+function ocrWorker() {
+  sharedWorker ??= (async () => {
+    // Loaded on demand: the OCR engine is megabytes, and most visits never
+    // import an image.
+    const { createWorker, PSM } = await import('tesseract.js')
+    const worker = await createWorker('eng', 1, {
+      workerPath: `${OCR_BASE}worker.min.js`,
+      corePath: `${OCR_BASE}tesseract-core-simd-lstm.wasm.js`,
+      langPath: OCR_BASE,
+    })
     await worker.setParameters({
       tessedit_char_whitelist: '0123456789',
       // Each crop is one fret number on its own.
       tessedit_pageseg_mode: PSM.SINGLE_WORD,
     })
-    entries = []
-    const read = async (crop: HTMLCanvasElement): Promise<number> => {
-      const result = await worker.recognize(crop)
-      return Number(result.data.text.trim())
-    }
-    const isFret = (value: number) => Number.isInteger(value) && value >= 0 && value <= MAX_FRET
-    for (const column of analysis.columns) {
-      const crop = cropForOcr(analysis, column)
-      let fret = await read(crop)
-      // A single tight glyph sometimes comes back empty in word mode -- a
-      // bold 0 whose counter is nearly closed, for one. Only then is it worth
-      // a second look in single-character mode; a *wrong* first answer gives
-      // no such signal, so this is a retry on silence, not a vote.
-      if (!isFret(fret) && column.glyphs === 1) {
-        await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_CHAR })
-        fret = await read(crop)
-        await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_WORD })
-      }
-      if (isFret(fret)) {
-        entries.push({ kind: 'note', string: column.string, fret, value: IMPORT_VALUE, dotted: false })
-      } else {
-        unread++
-        entries.push({ kind: 'rest', value: IMPORT_VALUE, dotted: false })
-      }
-    }
-  } finally {
-    await worker.terminate()
+    return worker
+  })()
+  return sharedWorker
+}
+
+/** Pixel analysis plus OCR: an image becomes eighth-note entries. */
+export async function readTabEntries(image: ImageData): Promise<TabEntriesResult> {
+  const analysis = analyzeTabImage(image)
+  if (!analysis.ok) return { ok: false, reason: analysis.reason }
+
+  const { PSM } = await import('tesseract.js')
+  const worker = await ocrWorker()
+  const entries: Entry[] = []
+  let unread = 0
+  const read = async (crop: HTMLCanvasElement): Promise<number> => {
+    const result = await worker.recognize(crop)
+    return Number(result.data.text.trim())
   }
+  const isFret = (value: number) => Number.isInteger(value) && value >= 0 && value <= MAX_FRET
+  for (const column of analysis.columns) {
+    const crop = cropForOcr(analysis, column)
+    let fret = await read(crop)
+    // A single tight glyph sometimes comes back empty in word mode -- a
+    // bold 0 whose counter is nearly closed, for one. Only then is it worth
+    // a second look in single-character mode; a *wrong* first answer gives
+    // no such signal, so this is a retry on silence, not a vote.
+    if (!isFret(fret) && column.glyphs === 1) {
+      await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_CHAR })
+      fret = await read(crop)
+      await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_WORD })
+    }
+    if (isFret(fret)) {
+      entries.push({ kind: 'note', string: column.string, fret, value: IMPORT_VALUE, dotted: false })
+    } else {
+      unread++
+      entries.push({ kind: 'rest', value: IMPORT_VALUE, dotted: false })
+    }
+  }
+  return { ok: true, entries, unread }
+}
+
+export async function fromTabImage(file: File, title: string): Promise<ImageImport> {
+  const image = await imageDataOf(file)
+  if (!image) return { ok: false, reason: 'unreadable' }
+
+  const result = await readTabEntries(image)
+  if (!result.ok) return { ok: false, reason: result.reason }
 
   const base = { title, time: { beats: 4, beatType: 4 }, keyFifths: 0 }
-  const measures = intoMeasures(entries, base)
+  const measures = intoMeasures(result.entries, base)
   if (measures.length > MAX_MEASURES) return { ok: false, reason: 'too-long' }
-  return { ok: true, score: { ...base, measures }, unread }
+  return { ok: true, score: { ...base, measures }, unread: result.unread }
 }

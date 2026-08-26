@@ -91,6 +91,15 @@ correction UI. The synthetic-screenshot tests in `tests/editor.spec.ts` are the 
 the analyser must survive (both ink polarities, digits crossing the string lines, chords
 refused).
 
+`src/components/VideoImport.tsx` is video mode: a YouTube embed plus `getDisplayMedia`
+capture feeding the same recogniser (`readTabEntries`), appending to the open score via
+`useEditor().appendEntries` -- one capture, one commit, one undo step. The rendered score is
+`hidden` (not unmounted -- OSMD owns the container) while this mode is up, because the capture
+films this very tab and staff lines on screen read as false string lines. The OCR worker is a
+module-level singleton so repeated captures do not re-download megabytes. Tests stub
+`getDisplayMedia` with a canvas `captureStream()` -- the permission prompt is the only part the
+real path has that the tests do not.
+
 `src/editor/storage.ts` owns the saved scores: one key per score plus an index naming them and
 remembering which was open. Per-score keys are what let an edit write only the score being edited —
 the app saves on every keystroke, and rewriting the whole library that often would get slower with

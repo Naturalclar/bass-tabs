@@ -498,3 +498,31 @@ body {
     break-after: page;
   }
 }
+
+/* ---- video mode ---------------------------------------------------- */
+
+.video-import {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.video-import__link {
+  flex: 1;
+  min-width: 16rem;
+}
+
+.video-import__notice {
+  margin: 0;
+  color: var(--ui-muted);
+}
+
+/* 16:9, wide enough that an overlay tab's digits survive the capture. */
+.video-import__player {
+  width: 100%;
+  max-width: 960px;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  border-radius: 8px;
+  background: #000;
+}

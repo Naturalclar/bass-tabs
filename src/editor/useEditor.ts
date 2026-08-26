@@ -243,6 +243,40 @@ export function useEditor() {
     [commit, cursor, score],
   )
 
+  /**
+   * Appends a run of entries after everything already written, filling the
+   * last used measure and growing from there -- what a video-mode capture
+   * needs: each capture is one commit, so one Ctrl+Z takes back one capture.
+   * Entries past MAX_MEASURES are dropped and counted rather than failing the
+   * whole batch: half a capture on the paper beats none at the very end of a
+   * long score.
+   */
+  const appendEntries = useCallback(
+    (entries: Entry[]): { added: number; dropped: number } => {
+      const measures = score.measures.map((measure) => [...measure])
+      // Trailing empty measures are the append point, not content to keep
+      // after: writing into bar 1 of an untouched score should not leave 3
+      // empty bars in front of the next capture.
+      while (measures.length > 1 && measures[measures.length - 1].length === 0) measures.pop()
+      let added = 0
+      for (const entry of entries) {
+        const last = measures[measures.length - 1]
+        if (measureRemaining([...last, entry], score.time) >= 0) last.push(entry)
+        else if (measures.length < MAX_MEASURES) measures.push([entry])
+        else break
+        added++
+      }
+      if (added > 0) {
+        commit(
+          { ...score, measures },
+          { measure: measures.length - 1, index: measures[measures.length - 1].length },
+        )
+      }
+      return { added, dropped: entries.length - added }
+    },
+    [commit, score],
+  )
+
   const putRest = useCallback(
     (at: Cursor = cursor) => {
       place({ kind: 'rest', value, dotted }, at)
@@ -548,6 +582,7 @@ export function useEditor() {
     moveNote,
     setFretAt,
     putRest,
+    appendEntries,
     removeAtCursor,
     moveCursor,
     moveMeasure,
