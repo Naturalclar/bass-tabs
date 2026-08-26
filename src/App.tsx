@@ -23,7 +23,10 @@ const FRET_KEY_WINDOW_MS = 800
 
 export default function App() {
   const { containerRef, loadScore, status } = useOsmd()
-  const [mode, setMode] = useState<Mode>('open')
+  // The first thing on screen is the saved score, not an empty page waiting
+  // for a file: the storage layer restores whatever was open last, so there
+  // is always a score to show, and a returning user came back for theirs.
+  const [mode, setMode] = useState<Mode>('edit')
   const editor = useEditor()
 
   const handlePickFile = useCallback(

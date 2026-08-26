@@ -16,8 +16,9 @@ import { pdfPageCount, pdfPageSizeMm } from './pdf.ts'
 
 
 async function openEditor(page: Page) {
+  // The editor is the first view -- opening the site is opening the editor.
   await page.goto(BASE_PATH)
-  await page.getByRole('button', { name: '譜面を作る' }).click()
+  await page.locator('.tab-editor').waitFor()
 }
 
 /** Fills measure 1 with four quarter notes on the given string. */
@@ -26,6 +27,18 @@ async function fillFirstMeasure(page: Page, stringLabel: string) {
     await page.getByRole('button', { name: `1 小節目 ${i} 番目 ${stringLabel} 弦` }).click()
   }
 }
+
+/**
+ * The first thing on screen is a score, not an empty page waiting for a file.
+ * There is always one to show -- the storage layer restores whatever was open
+ * last, or an empty score -- and a returning user came back for theirs.
+ */
+test('the first view is the score, not the file picker', async ({ page }) => {
+  await page.goto(BASE_PATH)
+
+  await expect(page.locator('svg.score-page')).toHaveCount(1)
+  await expect(page.locator('.tab-editor')).toBeVisible()
+})
 
 test('a score entered by clicking renders and prints as A4', async ({ page }) => {
   await openEditor(page)
@@ -411,7 +424,6 @@ test.describe('譜面の一覧', () => {
     await expect(page.locator('.tab-cell--note')).toHaveText(['9'])
 
     await page.reload()
-    await page.getByRole('button', { name: '譜面を作る' }).click()
 
     await expect(page.locator('.score-row')).toHaveCount(2)
     await expect(page.locator('.tab-cell--note')).toHaveText(['9'])
@@ -870,7 +882,6 @@ test.describe('書き出しと取り込み', () => {
     // The whole point: survive losing the browser's storage.
     await page.evaluate(() => localStorage.clear())
     await page.reload()
-    await page.getByRole('button', { name: '譜面を作る' }).click()
     await expect(page.locator('.score-row')).toHaveCount(1)
 
     await page.setInputFiles('.sidebar input[type="file"]', saved)
@@ -964,8 +975,8 @@ test('an exported score can be loaded back in', async ({ page }, testInfo) => {
   await download.saveAs(saved)
 
   // Round-trip through the import path: this is what catches MusicXML that
-  // renders only because the editor happened to hold it in memory.
-  await page.getByRole('button', { name: '譜面を作る' }).click()
+  // renders only because the editor happened to hold it in memory. Picking a
+  // file leaves the editor by itself.
   await page.setInputFiles('input[type="file"]', saved)
   await expect(page.getByRole('status')).toContainText('ページ (A4 縦)')
   await expect(page.locator('svg.score-page')).toHaveCount(1)
