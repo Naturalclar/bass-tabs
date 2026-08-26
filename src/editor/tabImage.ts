@@ -28,6 +28,8 @@ export type TabImageAnalysis =
       mask: Uint8Array
       /** Luminance normalised to dark-ink-on-white, antialiasing intact. */
       ink: Uint8Array
+      /** Same, before the line erasure -- the fallback crop for OCR. */
+      inkOriginal: Uint8Array
       /** Connected-component label per pixel, -1 where the mask is empty. */
       labels: Int32Array
       /** Digit groups left to right, each on exactly one string. */
@@ -179,6 +181,7 @@ export function analyzeTabImage(image: ImageData): TabImageAnalysis {
     }
   }
   if (!mask || !ink || !lanes) return { ok: false, reason: 'no-lanes' }
+  const inkOriginal = ink.slice()
 
   const bands = lanes
   const laneCenters = bands.map(center)
@@ -345,13 +348,21 @@ export function analyzeTabImage(image: ImageData): TabImageAnalysis {
       const glyphHeight = glyph.y1 - glyph.y0 + 1
       // Line leftovers are far wider than tall; digits never are.
       if (glyphWidth > glyphHeight * 4) return false
+      // Note stems are the other slender shape: a bare vertical stroke under
+      // the staff. One at the same x as a real digit on another string read
+      // as a chord and refused the whole capture.
+      if (glyphHeight > glyphWidth * 5) return false
       // A digit stands a good part of the lane gap tall. Stubs a few pixels
       // high -- the refilled end of an erased line, compression specks --
       // otherwise ride along in a cluster and OCR reads them as extra digits
       // (a 12 came back as 312).
       if (glyphHeight < laneGap * 0.25) return false
       if (glyphHeight > laneGap * 1.5) return false
-      if (glyph.laneDistance > laneGap * 0.75) return false
+      // Fret digits sit centred on their line. Overlays hang more digits
+      // around the staff -- fingerings above it, tempo below -- and half a
+      // gap of slack was enough to adopt them onto the outer strings, where
+      // they collided with real notes as phantom chords.
+      if (glyph.laneDistance > laneGap * 0.35) return false
       if (glyph.x1 < tabX0 || glyph.x0 > tabX1) return false
       return true
     })
@@ -390,5 +401,5 @@ export function analyzeTabImage(image: ImageData): TabImageAnalysis {
     })
   }
 
-  return { ok: true, width, height, mask, ink, labels, columns }
+  return { ok: true, width, height, mask, ink, inkOriginal, labels, columns }
 }

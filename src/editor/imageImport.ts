@@ -43,12 +43,15 @@ async function imageDataOf(file: File): Promise<ImageData | null> {
  * input whatever the screenshot's colours, compression noise or background were.
  */
 function cropForOcr(
-  analysis: { ink: Uint8Array; labels: Int32Array; width: number; height: number },
+  analysis: { ink: Uint8Array; inkOriginal: Uint8Array; labels: Int32Array; width: number; height: number },
   region: { x0: number; y0: number; x1: number; y1: number; labels: number[] },
+  /** Read from the un-erased image: the fallback when erasure maimed a digit. */
+  original = false,
 ): HTMLCanvasElement {
   const SCALE = 4
   const MARGIN = 16
-  const { ink, labels, width, height } = analysis
+  const { labels, width, height } = analysis
+  const ink = original ? analysis.inkOriginal : analysis.ink
   const wanted = new Set(region.labels)
   const cropWidth = region.x1 - region.x0 + 1
   const cropHeight = region.y1 - region.y0 + 1
@@ -187,6 +190,14 @@ export async function readTabEntries(image: ImageData): Promise<TabEntriesResult
       await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_CHAR })
       fret = await read(crop)
       await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_WORD })
+    }
+    // Erasing the line can maim a digit whose stroke opens right at the
+    // band -- a 6 loses its right shoulder and reads as nothing. When the
+    // clean crop says nothing at all, the un-erased crop (line and all)
+    // gets a turn; the digit is whole there, and OCR handles a short
+    // strikethrough better than a missing stroke.
+    if (!isFret(fret)) {
+      fret = await read(cropForOcr(analysis, column, true))
     }
     if (isFret(fret)) {
       entries.push({ kind: 'note', string: column.string, fret, value: IMPORT_VALUE, dotted: false })

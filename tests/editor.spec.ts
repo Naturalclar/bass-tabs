@@ -1329,6 +1329,58 @@ test.describe('画像からの取り込み', () => {
     expect(await notes(page)).toEqual(['E3', 'D9'])
   })
 
+  test('符幹や浮いた数字が並ぶ実物風のオーバーレイでも和音扱いされない', async ({ page }) => {
+    test.setTimeout(120_000)
+    // Modelled on the reported frame: a play-through overlay hangs rhythm
+    // stems and beams under the staff, extra numbers above it, X ghost
+    // notes on the lines, a stem running through the bottom line, and a
+    // playhead bar across all four. None of that is a note on another
+    // string, but each lined up with a real digit and the capture was
+    // refused as a chord.
+    const lanes = [60, 95, 130, 165]
+    const digits = [
+      { lane: 3, x: 80, text: '4' },
+      { lane: 2, x: 180, text: '6' },
+      { lane: 2, x: 280, text: '5' },
+      { lane: 1, x: 380, text: '0' },
+    ]
+    const overlay = `
+      <div id="tab" style="position:relative;width:760px;height:260px;background:#f0b429;color:#221">
+        ${lanes
+          .map(
+            (y) =>
+              `<div style="position:absolute;left:16px;right:16px;top:${y}px;height:3px;background:#221"></div>`,
+          )
+          .join('')}
+        ${digits
+          .map(
+            (note) =>
+              `<span style="position:absolute;left:${note.x}px;top:${lanes[note.lane] + 2}px;transform:translateY(-50%);background:#f0b429;padding:0 2px;font:700 22px monospace">${note.text}</span>`,
+          )
+          .join('')}
+        <span style="position:absolute;left:180px;top:${lanes[0] - 32}px;font:700 20px monospace">5</span>
+        <span style="position:absolute;left:480px;top:${lanes[1] + 2}px;transform:translateY(-50%);background:#f0b429;padding:0 2px;font:700 22px monospace">X</span>
+        ${digits
+          .map(
+            (note) =>
+              `<div style="position:absolute;left:${note.x + 4}px;top:${lanes[3] + 16}px;width:3px;height:16px;background:#221"></div>`,
+          )
+          .join('')}
+        <div style="position:absolute;left:84px;top:${lanes[3] + 32}px;width:200px;height:4px;background:#221"></div>
+        <div style="position:absolute;left:560px;top:${lanes[3] - 13}px;width:3px;height:29px;background:#221"></div>
+        <div style="position:absolute;left:320px;top:${lanes[0] - 14}px;width:8px;height:${lanes[3] - lanes[0] + 28}px;background:#3a3;border-radius:4px"></div>
+      </div>`
+    const image = await screenshotTab(page, 'overlay.png', overlay)
+    await openEditor(page)
+    await importImage(page, image)
+
+    // The X is a ghost note the model cannot spell: it lands as a rest, and
+    // the notice says one thing went unread instead of refusing everything.
+    await expect(page.locator('.sidebar__notice')).toContainText('1 曲を取り込みました')
+    expect(await notes(page)).toEqual(['E4', 'A6', 'A5', 'D0'])
+    await expect(page.locator('.tab-column__rest')).toHaveCount(1)
+  })
+
   test('同じ位置に 2 本の弦の数字がある画像は取り込まず、理由を出す', async ({ page }) => {
     const image = await screenshotTab(
       page,
