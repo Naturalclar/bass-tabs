@@ -9,6 +9,7 @@ import { useEditor, type Cursor } from './editor/useEditor.ts'
 import type { ScoreId } from './editor/storage.ts'
 import { fromBackup, toBackup } from './editor/backup.ts'
 import { fromMusicXml } from './editor/musicxmlImport.ts'
+import { fromTabImage } from './editor/imageImport.ts'
 import { useMidiInput } from './editor/useMidiInput.ts'
 import { MAX_MEASURES, NOTE_VALUES, type NoteValue } from './editor/model.ts'
 import { MAX_FRET, STRINGS } from './editor/tuning.ts'
@@ -235,6 +236,34 @@ export default function App() {
    */
   const handleImportFile = useCallback(
     async (file: File) => {
+      if (/\.(png|jpe?g|webp)$/i.test(file.name)) {
+        // OCR takes seconds (the engine alone is megabytes, loaded lazily),
+        // so the wait has to say it is one.
+        setImportNotice('画像を読み取っています…')
+        const result = await fromTabImage(file, file.name.replace(/\.[^.]+$/, ''))
+        if (!result.ok) {
+          setImportNotice(
+            result.reason === 'no-lanes'
+              ? '4 本の弦の線が見つかりませんでした'
+              : result.reason === 'chord'
+                ? '同じ位置に複数の弦の数字があるので取り込めません（和音は持てないため）'
+                : result.reason === 'no-notes'
+                  ? '弦の線の上に数字が見つかりませんでした'
+                  : result.reason === 'too-long'
+                    ? `小節が多すぎて取り込めません（上限 ${MAX_MEASURES} 小節）`
+                    : '画像を読めませんでした',
+          )
+          return
+        }
+        editor.importScores([result.score])
+        setImportNotice(
+          result.unread > 0
+            ? `1 曲を取り込みました（${result.unread} 箇所読めず、休符にしてあります）`
+            : '1 曲を取り込みました（全部 8 分音符なので、音価はエディタで直してください）',
+        )
+        return
+      }
+
       const text = await file.text()
       if (file.name.endsWith('.json')) {
         const result = fromBackup(text)

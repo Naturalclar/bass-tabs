@@ -1112,6 +1112,193 @@ test.describe('書き出しと取り込み', () => {
   })
 })
 
+/**
+ * Screenshot import: the pixel-analysis half is deterministic, and the OCR
+ * half is pinned by synthetic screenshots rendered right here -- real images
+ * would rot in the repo and hide *why* they look the way they do. Both ink
+ * polarities are covered because a YouTube overlay is usually light-on-dark
+ * while a scanned page is dark-on-light, and the analyser must not care.
+ */
+test.describe('画像からの取り込み', () => {
+  const fixtures = mkdtempSync(join(tmpdir(), 'bass-tabs-'))
+
+  function tabHtml(opts: {
+    dark?: boolean
+    /** Draw digits straight over the lines, no backing patch -- the hard case. */
+    plain?: boolean
+    notes: { lane: number; x: number; text: string }[]
+  }) {
+    const ink = opts.dark ? '#eee' : '#111'
+    const paper = opts.dark ? '#181818' : '#fff'
+    const lanes = [30, 60, 90, 120]
+    return `
+      <div id="tab" style="position:relative;width:640px;height:150px;background:${paper};font:700 20px monospace;color:${ink}">
+        ${lanes
+          .map(
+            (y) =>
+              `<div style="position:absolute;left:16px;right:16px;top:${y}px;height:2px;background:${ink}"></div>`,
+          )
+          .join('')}
+        ${opts.notes
+          .map(
+            (note) =>
+              `<span style="position:absolute;left:${note.x}px;top:${lanes[note.lane] + 1}px;transform:translateY(-50%);${opts.plain ? '' : `background:${paper};padding:0 2px`}">${note.text}</span>`,
+          )
+          .join('')}
+      </div>`
+  }
+
+  /** Renders the mock tab and screenshots it -- the "image from a video". */
+  async function screenshotTab(page: Page, name: string, html: string) {
+    const path = join(fixtures, name)
+    await page.setContent(`<body style="margin:0">${html}</body>`)
+    writeFileSync(path, await page.locator('#tab').screenshot())
+    return path
+  }
+
+  async function importImage(page: Page, path: string) {
+    await page.setInputFiles('.sidebar input[type="file"]', path)
+    // OCR takes a moment; the settled notice is the completion signal.
+    await page.waitForFunction(
+      () =>
+        !document
+          .querySelector('.sidebar__notice')
+          ?.textContent?.includes('読み取っています'),
+      undefined,
+      { timeout: 90_000 },
+    )
+  }
+
+  const notes = (page: Page) =>
+    page
+      .locator('.tab-cell--note')
+      .evaluateAll((cells) =>
+        cells.map(
+          (cell) =>
+            (cell.getAttribute('aria-label') ?? '').match(/([GDAE]) 弦/)?.[1] + cell.textContent,
+        ),
+      )
+
+  test('黒地に白のタブ譜が弦とフレットごと読める', async ({ page }) => {
+    test.setTimeout(120_000)
+    const image = await screenshotTab(
+      page,
+      'dark.png',
+      tabHtml({
+        dark: true,
+        notes: [
+          { lane: 3, x: 60, text: '3' },
+          { lane: 2, x: 140, text: '10' },
+          { lane: 1, x: 220, text: '0' },
+          { lane: 0, x: 300, text: '24' },
+        ],
+      }),
+    )
+    await openEditor(page)
+    await importImage(page, image)
+
+    await expect(page.locator('.sidebar__notice')).toContainText('1 曲を取り込みました')
+    expect(await notes(page)).toEqual(['E3', 'A10', 'D0', 'G24'])
+    // Everything lands as an eighth note: rhythm is not guessed from pixels,
+    // the editor is where it gets fixed.
+    await expect(page.locator('.tab-column__value').first()).toHaveText('♪')
+    // The score is named after the file and survives a reload -- what came
+    // through OCR passes the same storage validation as everything else.
+    await page.reload()
+    await expect(page.locator('.score-row--current')).toContainText('dark')
+    expect(await notes(page)).toEqual(['E3', 'A10', 'D0', 'G24'])
+  })
+
+  test('白地に黒でも同じに読める', async ({ page }) => {
+    test.setTimeout(120_000)
+    const image = await screenshotTab(
+      page,
+      'light.png',
+      tabHtml({
+        notes: [
+          { lane: 3, x: 60, text: '5' },
+          { lane: 1, x: 140, text: '12' },
+        ],
+      }),
+    )
+    await openEditor(page)
+    await importImage(page, image)
+    expect(await notes(page)).toEqual(['E5', 'D12'])
+  })
+
+  test('数字が弦の線をまたいでいても読める', async ({ page }) => {
+    test.setTimeout(120_000)
+    // No backing patch: the line runs straight through every digit, the way
+    // overlays often draw them. Erasing the line must spare the strokes that
+    // cross it, or the digits fall apart before OCR ever sees them.
+    const image = await screenshotTab(
+      page,
+      'crossed.png',
+      tabHtml({
+        plain: true,
+        notes: [
+          { lane: 3, x: 60, text: '3' },
+          { lane: 2, x: 140, text: '8' },
+          { lane: 0, x: 220, text: '12' },
+        ],
+      }),
+    )
+    await openEditor(page)
+    await importImage(page, image)
+    expect(await notes(page)).toEqual(['E3', 'A8', 'G12'])
+  })
+
+  test('小節に収まらない分は次の小節へ流れる', async ({ page }) => {
+    test.setTimeout(120_000)
+    const image = await screenshotTab(
+      page,
+      'nine.png',
+      tabHtml({
+        notes: Array.from({ length: 9 }, (_, i) => ({ lane: 3, x: 40 + i * 60, text: '3' })),
+      }),
+    )
+    await openEditor(page)
+    await importImage(page, image)
+
+    // Nine eighth notes: eight fill the first 4/4 bar, the ninth starts the next.
+    const perBar = await page
+      .locator('.tab-measure')
+      .evaluateAll((bars) => bars.map((bar) => bar.querySelectorAll('.tab-cell--note').length))
+    expect(perBar).toEqual([8, 1])
+  })
+
+  test('同じ位置に 2 本の弦の数字がある画像は取り込まず、理由を出す', async ({ page }) => {
+    const image = await screenshotTab(
+      page,
+      'chord.png',
+      tabHtml({
+        notes: [
+          { lane: 0, x: 60, text: '3' },
+          { lane: 2, x: 60, text: '5' },
+        ],
+      }),
+    )
+    await openEditor(page)
+    await importImage(page, image)
+
+    await expect(page.locator('.sidebar__notice')).toContainText('和音は持てない')
+    await expect(page.locator('.score-row')).toHaveCount(1)
+  })
+
+  test('弦の線が無い画像は取り込まず、理由を出す', async ({ page }) => {
+    const image = await screenshotTab(
+      page,
+      'no-lanes.png',
+      `<div id="tab" style="width:400px;height:120px;background:#fff;color:#111;font:20px monospace">ただの文字</div>`,
+    )
+    await openEditor(page)
+    await importImage(page, image)
+
+    await expect(page.locator('.sidebar__notice')).toContainText('弦の線が見つかりませんでした')
+    await expect(page.locator('.score-row')).toHaveCount(1)
+  })
+})
+
 test('an exported score can be loaded back in', async ({ page }, testInfo) => {
   await openEditor(page)
   await fillFirstMeasure(page, 'A')
