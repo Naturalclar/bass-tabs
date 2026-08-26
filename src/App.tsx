@@ -4,6 +4,7 @@ import { ScoreView } from './components/ScoreView'
 import { EditorPanel } from './components/EditorPanel'
 import { TabEditor } from './components/TabEditor'
 import { ScoreList } from './components/ScoreList'
+import { VideoImport } from './components/VideoImport'
 import { useOsmd } from './score/useOsmd'
 import { useEditor, type Cursor } from './editor/useEditor.ts'
 import type { ScoreId } from './editor/storage.ts'
@@ -14,7 +15,7 @@ import { useMidiInput } from './editor/useMidiInput.ts'
 import { MAX_MEASURES, NOTE_VALUES, type NoteValue } from './editor/model.ts'
 import { MAX_FRET, STRINGS } from './editor/tuning.ts'
 
-export type Mode = 'open' | 'edit'
+export type Mode = 'open' | 'edit' | 'video'
 
 /** Keys that pick a note value, by the first letter of its English name. */
 const VALUE_KEYS: Record<string, NoteValue> = { w: 1, h: 2, q: 4, e: 8, s: 16 }
@@ -95,7 +96,9 @@ export default function App() {
   )
 
   useEffect(() => {
-    if (mode !== 'edit') return
+    // The file viewer has no edits to undo; the editor and video mode do --
+    // in video mode one Ctrl+Z takes back one capture.
+    if (mode === 'open') return
     function onKeyDown(event: globalThis.KeyboardEvent) {
       if (!event.metaKey && !event.ctrlKey) return
       const key = event.key.toLowerCase()
@@ -322,7 +325,7 @@ export default function App() {
         onPickFile={handlePickFile}
         onPrint={() => window.print()}
       />
-      {mode === 'edit' && (
+      {(mode === 'edit' || mode === 'video') && (
         <div className="workspace">
           <ScoreList
             scores={editor.scores}
@@ -342,6 +345,11 @@ export default function App() {
             }}
             notice={importNotice}
           />
+          {mode === 'video' ? (
+            <div className="workspace__main">
+              <VideoImport onAppend={editor.appendEntries} />
+            </div>
+          ) : (
           <div className="workspace__main">
             <EditorPanel
             title={editor.score.title}
@@ -379,9 +387,13 @@ export default function App() {
               onKeyDown={handleKeyDown}
             />
           </div>
+          )}
         </div>
       )}
-      <ScoreView containerRef={containerRef} status={status} />
+      {/* The score stays mounted -- OSMD owns this container -- but in video
+          mode it must not be visible: the capture films this same tab, and
+          staff lines on screen read as false string lines. */}
+      <ScoreView containerRef={containerRef} status={status} hidden={mode === 'video'} />
     </>
   )
 }
