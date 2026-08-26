@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  MAX_MEASURES,
   emptyScore,
   fits,
   measureRemaining,
@@ -171,7 +172,7 @@ export function useEditor() {
   }, [])
 
   const setMeasureCount = useCallback((count: number) => {
-    const clamped = Math.min(Math.max(count, 1), 64)
+    const clamped = Math.min(Math.max(count, 1), MAX_MEASURES)
     setScore((current) => ({
       ...current,
       measures:
