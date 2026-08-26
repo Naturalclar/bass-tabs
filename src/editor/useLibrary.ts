@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { emptyScore, type Score } from './model.ts'
 import {
   newScoreId,
@@ -46,6 +46,20 @@ export function useLibrary() {
   useEffect(() => {
     writeScore(currentId, score)
   }, [currentId, score])
+
+  // The very first visit invents a library in memory, and nothing above has
+  // written its index yet -- so the first session's edits saved their score
+  // under an id no index named, and a reload came up empty. Write the index
+  // once on mount; after that the add/remove/switch paths keep it current.
+  const wroteIndex = useRef(false)
+  useEffect(() => {
+    if (wroteIndex.current) return
+    wroteIndex.current = true
+    writeIndex(
+      scores.map((entry) => entry.id),
+      currentId,
+    )
+  }, [currentId, scores])
 
   /**
    * Moves to another score. The undo history stays behind: it describes edits

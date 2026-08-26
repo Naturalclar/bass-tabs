@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { measureRemaining, type Entry, type NoteValue, type Score, type TimeSignature } from './model.ts'
+import {
+  clampTempo,
+  measureRemaining,
+  type Entry,
+  type NoteValue,
+  type Score,
+  type TimeSignature,
+} from './model.ts'
 import { toMusicXml } from './musicxml.ts'
 import { MAX_FRET, STRINGS } from './tuning.ts'
 import { useLibrary } from './useLibrary.ts'
@@ -217,6 +224,18 @@ export function useEditor() {
     [commit, cursor, score],
   )
 
+  /**
+   * Tempo is part of the score -- printed on the page, written to the file --
+   * so a change goes through commit() and is undoable. One key for the whole
+   * adjustment: nudging 100 to 160 is one step back, not sixty.
+   */
+  const setTempo = useCallback(
+    (tempo: number) => {
+      commit({ ...score, tempo: clampTempo(Math.round(tempo)) }, cursor, 'tempo')
+    },
+    [commit, cursor, score],
+  )
+
   const setKeyFifths = useCallback(
     (keyFifths: number) => {
       commit({ ...score, keyFifths }, cursor)
@@ -303,6 +322,7 @@ export function useEditor() {
     moveMeasure,
     setTime,
     setKeyFifths,
+    setTempo,
     setTitle,
     setMeasureCount,
     scores: library.scores,

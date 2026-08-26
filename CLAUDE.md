@@ -157,9 +157,13 @@ panel). The note list is built from the `Score` model directly — never from th
 rendered page — so `WRITTEN_OCTAVE_SHIFT` does not apply and notes sound at real pitch, which is
 the point of the shift living only in `musicxml.ts`. `schedule()` is a pure function and is
 tested without an AudioContext in `tests/editor.spec.ts`; the hook is the only code touching Web
-Audio. BPM is a playback-only setting — `Score` has no tempo field and the stored shape is
-unchanged. Playback stops when the open score changes, per the rule below about remembered
-positions, and when leaving the editor (in video mode it would bleed into the capture).
+Audio. Tempo lives on `Score` (`tempo`, quarter-note BPM whatever the meter): it is printed as
+♩=N via `tempoXml()` in musicxml.ts, written to the exported file as `<sound tempo>`, read back
+by the importer, and changed through `commit()` (one `CommitKey`, so an adjustment is one undo
+step). `STORAGE_VERSION` is 4; version 3 scores are lifted with the default tempo, the same
+style as `fromVersion2`. Playback stops when the open score changes, per the rule below about
+remembered positions, and when leaving the editor (in video mode it would bleed into the
+capture).
 
 MusicXML's two numbering schemes run in opposite directions and are the easiest thing to break:
 `<string>` counts from the highest-pitched string (G is 1), `<staff-tuning line>` counts from the

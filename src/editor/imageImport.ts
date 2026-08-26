@@ -1,4 +1,4 @@
-import { MAX_MEASURES, measureRemaining, type Entry, type Score } from './model.ts'
+import { MAX_MEASURES, emptyScore, measureRemaining, type Entry, type Score } from './model.ts'
 import { MAX_FRET } from './tuning.ts'
 import { analyzeTabImage, otsu } from './tabImage.ts'
 import { BASE_PATH } from '../../base-path.ts'
@@ -230,7 +230,7 @@ export async function fromTabImage(file: File, title: string): Promise<ImageImpo
   const result = await readTabEntries(image)
   if (!result.ok) return { ok: false, reason: result.reason }
 
-  const base = { title, time: { beats: 4, beatType: 4 }, keyFifths: 0 }
+  const base = { title, time: { beats: 4, beatType: 4 }, keyFifths: 0, tempo: emptyScore().tempo }
   const measures = intoMeasures(result.entries, base)
   if (measures.length > MAX_MEASURES) return { ok: false, reason: 'too-long' }
   return { ok: true, score: { ...base, measures }, unread: result.unread }

@@ -155,8 +155,8 @@ export default function App() {
                 midi={midi.status}
                 playing={playback.playing}
                 canPlay={playback.canPlay}
-                bpm={playback.bpm}
-                onBpm={playback.setBpm}
+                tempo={editor.score.tempo}
+                onTempo={editor.setTempo}
                 onTogglePlay={playback.playing ? playback.stop : playback.play}
                 onTitle={editor.setTitle}
                 onTime={editor.setTime}
