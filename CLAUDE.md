@@ -31,9 +31,11 @@ pnpm test:print # print regression check (builds, serves, prints to PDF)
 CI runs `lint`, `typecheck` and a build in one job and `test:print` in another, so `pnpm check`
 passing is not the same as CI passing — the build and the print checks are not in it.
 
-The only tests are the print checks in `tests/` — `print.spec.ts` for imported files and
-`editor.spec.ts` for scores written in the app; there are no unit tests. `pnpm test:print`
-builds and serves the app itself, so it needs no running dev server.
+The only tests are the Playwright specs in `tests/` — `print.spec.ts` for imported files, and
+one spec per editor area for scores written in the app (`editor-input`, `library`,
+`import-export`, `image-import`, `video-import`, `playback`, `appearance`, sharing
+`tests/helpers.ts`); there are no unit tests. `pnpm test:print` runs them all — it builds and
+serves the app itself, so it needs no running dev server.
 
 ## Two non-negotiable technical choices
 
@@ -60,8 +62,8 @@ The whole app is three moving parts:
   (`210mm × 297mm`), which only works because pages carry a `viewBox`. The screen UI is dark at
   every surface it paints, `:root` declares `color-scheme: dark` to match, and **every control
   states its own `color`** — a background without one inherits the UA's near-white control text and
-  vanishes. `tests/editor.spec.ts` asserts contrast rather than colour values so a repalette is
-  free but a regression is not.
+  vanishes. `tests/appearance.spec.ts` asserts contrast rather than colour values so a repalette
+  is free but a regression is not.
 
 ### The editor is a MusicXML generator, not a second renderer
 
@@ -89,7 +91,7 @@ people already had scores saved.
 
 Editing is split in three. `edit.ts` holds the score transformations as pure functions (`Score`
 in, `Score` out; null means "this edit has nowhere to go") — tested directly in
-`tests/editor.spec.ts`, the same way playback's `schedule()` is. `useLibrary.ts` owns which
+`tests/editor-input.spec.ts`, the same way playback's `schedule()` is. `useLibrary.ts` owns which
 scores exist, which is open, and the localStorage writes. `useEditor.ts` connects the two:
 cursor, undo history, and `commit()`.
 
@@ -108,7 +110,7 @@ pixel analysis (line detection, glyph clustering — pure, testable) in the form
 orchestration in the latter. tesseract.js and its assets are self-hosted under `public/ocr/`
 (lazy-loaded; `.oxlintrc.json` ignores that dir — it is third-party build output). Note values
 are deliberately not guessed: everything imports as eighth notes and the editor is the
-correction UI. The synthetic-screenshot tests in `tests/editor.spec.ts` are the spec for what
+correction UI. The synthetic-screenshot tests in `tests/image-import.spec.ts` are the spec for what
 the analyser must survive (both ink polarities, digits crossing the string lines, chords
 refused, the staff inside a busy full-page screenshot, a five-line notation staff nearby).
 The staff is found by geometry -- four long, thin, *evenly spaced* lines, tried in both
@@ -152,7 +154,7 @@ the two-page sample, 201 ledger-line elements against 10.
 panel). The note list is built from the `Score` model directly — never from the MusicXML or the
 rendered page — so `WRITTEN_OCTAVE_SHIFT` does not apply and notes sound at real pitch, which is
 the point of the shift living only in `musicxml.ts`. `schedule()` is a pure function and is
-tested without an AudioContext in `tests/editor.spec.ts`; the hook is the only code touching Web
+tested without an AudioContext in `tests/playback.spec.ts`; the hook is the only code touching Web
 Audio. BPM is a playback-only setting — `Score` has no tempo field and the stored shape is
 unchanged. Playback stops when the open score changes, per the rule below about remembered
 positions, and when leaving the editor (in video mode it would bleed into the capture).
@@ -214,7 +216,8 @@ Three traps:
 - A file handed to `setInputFiles` must sit under an **ASCII path**. `testInfo.outputPath()` builds
   its directory from the test title, and these titles are Japanese — Playwright then attaches
   nothing, raises nothing, and the change event never fires, which is indistinguishable from a
-  broken handler. `tests/editor.spec.ts` writes import fixtures to a `mkdtempSync` directory instead.
+  broken handler. The editor specs write import fixtures to a `mkdtempSync` directory instead
+  (`asciiFixtureDir` in `tests/helpers.ts`, which carries this warning).
 
 
 - `page.emulateMedia()` outlives navigation. Leaving it set to `'screen'` makes a later
