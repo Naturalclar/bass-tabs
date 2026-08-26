@@ -1,6 +1,6 @@
 import { MAX_MEASURES, measureRemaining, type Entry, type Score } from './model.ts'
 import { MAX_FRET } from './tuning.ts'
-import { analyzeTabImage } from './tabImage.ts'
+import { analyzeTabImage, otsu } from './tabImage.ts'
 
 /**
  * Reads a screenshot of a tab into a Score: pixel analysis finds the digit
@@ -43,39 +43,59 @@ async function imageDataOf(file: File): Promise<ImageData | null> {
  * input whatever the screenshot's colours, compression noise or background were.
  */
 function cropForOcr(
-  analysis: { mask: Uint8Array; ink: Uint8Array; width: number; height: number },
-  region: { x0: number; y0: number; x1: number; y1: number },
+  analysis: { ink: Uint8Array; labels: Int32Array; width: number; height: number },
+  region: { x0: number; y0: number; x1: number; y1: number; labels: number[] },
 ): HTMLCanvasElement {
   const SCALE = 4
   const MARGIN = 16
-  const { mask, ink, width, height } = analysis
+  const { ink, labels, width, height } = analysis
+  const wanted = new Set(region.labels)
   const cropWidth = region.x1 - region.x0 + 1
   const cropHeight = region.y1 - region.y0 + 1
 
-  // The glyph's own pixels with their antialiased edges, everything else
-  // white. The mask says which pixels belong to the glyph; dilating it by two
-  // brings the soft fringe back in, because the recogniser was trained on
-  // print, not on hard binary edges. The line was erased from the mask, so it
-  // stays out however the digits sat on it.
+  // The glyph re-binarised against its own neighbourhood, antialiasing kept.
+  // The global threshold that found the staff is tuned by the whole
+  // screenshot -- dark UI, bright video, everything -- and on some palettes
+  // it lands where a digit's thin antialiased bars fall on the background
+  // side and vanish. Around one glyph there are only two things, digit and
+  // paper, so a local threshold separates them cleanly. The erased line
+  // cannot come back: erasure painted it to background in `ink` itself.
+  const histogram = new Uint32Array(256)
+  let total = 0
+  for (let y = 0; y < cropHeight; y++) {
+    for (let x = 0; x < cropWidth; x++) {
+      histogram[ink[(region.y0 + y) * width + (region.x0 + x)]]++
+      total++
+    }
+  }
+  const local = otsu(histogram, total)
+
   const small = document.createElement('canvas')
   small.width = cropWidth
   small.height = cropHeight
   const smallContext = small.getContext('2d') as CanvasRenderingContext2D
   const pixels = smallContext.createImageData(cropWidth, cropHeight)
+  // Stencilled to the group's own components (dilated to keep the soft
+  // fringe): the box also frames whatever else fell inside it -- the erased
+  // line's antialiased rows, a neighbour's serif -- and OCR happily reads
+  // such flecks as extra digits (a 12 came back as 312).
+  const ours = (sourceX: number, sourceY: number) => {
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const nx = sourceX + dx
+        const ny = sourceY + dy
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue
+        if (wanted.has(labels[ny * width + nx])) return true
+      }
+    }
+    return false
+  }
   for (let y = 0; y < cropHeight; y++) {
     for (let x = 0; x < cropWidth; x++) {
       const sourceX = region.x0 + x
       const sourceY = region.y0 + y
-      let near = false
-      for (let dy = -2; dy <= 2 && !near; dy++) {
-        for (let dx = -2; dx <= 2 && !near; dx++) {
-          const nx = sourceX + dx
-          const ny = sourceY + dy
-          if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue
-          if (mask[ny * width + nx]) near = true
-        }
-      }
-      const value = near ? ink[sourceY * width + sourceX] : 255
+      const inkValue = ink[sourceY * width + sourceX]
+      const value = inkValue <= local && ours(sourceX, sourceY) ? inkValue : 255
       const offset = (y * cropWidth + x) * 4
       pixels.data[offset] = value
       pixels.data[offset + 1] = value
@@ -150,7 +170,10 @@ export async function readTabEntries(image: ImageData): Promise<TabEntriesResult
   let unread = 0
   const read = async (crop: HTMLCanvasElement): Promise<number> => {
     const result = await worker.recognize(crop)
-    return Number(result.data.text.trim())
+    // Only digits can appear (the whitelist), but the recogniser still airs
+    // its segmentation as whitespace -- "1 2" for a 12 -- so strip all of it.
+    const digits = result.data.text.replace(/\s+/g, '')
+    return digits === '' ? NaN : Number(digits)
   }
   const isFret = (value: number) => Number.isInteger(value) && value >= 0 && value <= MAX_FRET
   for (const column of analysis.columns) {

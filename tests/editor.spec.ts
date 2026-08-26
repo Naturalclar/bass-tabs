@@ -1267,6 +1267,68 @@ test.describe('画像からの取り込み', () => {
     expect(perBar).toEqual([8, 1])
   })
 
+  test('タブ譜以外が写り込んだスクリーンショットでも読める', async ({ page }) => {
+    test.setTimeout(120_000)
+    // The reported real-world failure: a capture of the whole tab -- dark
+    // browser UI around a bright video -- inverted the global ink guess and
+    // the four lines drowned. The staff has to be found by its geometry
+    // (four long, thin, evenly spaced lines), not by whole-image statistics.
+    const lanes = [60, 100, 140, 180]
+    const overlay = `
+      <div id="tab" style="position:relative;width:900px;height:640px;background:#1f2124;color:#ddd;font:14px sans-serif">
+        <div style="position:absolute;left:0;top:0;width:170px;height:640px;background:#26282c;padding:8px">サイドバー<br>無題 4 小節<br>無題 4 小節</div>
+        <div style="position:absolute;left:200px;top:40px;width:660px;height:300px;background:#f0b429">
+          ${lanes
+            .map(
+              (y) =>
+                `<div style="position:absolute;left:20px;right:20px;top:${y}px;height:3px;background:#221"></div>`,
+            )
+            .join('')}
+          <span style="position:absolute;left:120px;top:${lanes[3] + 2}px;transform:translateY(-50%);color:#221;font:700 22px monospace">5</span>
+          <span style="position:absolute;left:260px;top:${lanes[2] + 2}px;transform:translateY(-50%);color:#221;font:700 22px monospace">7</span>
+          <span style="position:absolute;left:400px;top:${lanes[0] + 2}px;transform:translateY(-50%);color:#221;font:700 22px monospace">12</span>
+        </div>
+      </div>`
+    const image = await screenshotTab(page, 'busy.png', overlay)
+    await openEditor(page)
+    await importImage(page, image)
+
+    await expect(page.locator('.sidebar__notice')).toContainText('1 曲を取り込みました')
+    expect(await notes(page)).toEqual(['E5', 'A7', 'G12'])
+  })
+
+  test('五線譜が並んでいても 4 本線のタブ譜の方を読む', async ({ page }) => {
+    test.setTimeout(120_000)
+    // A five-line notation staff above the tab, the way play-through videos
+    // draw both. Four of its five lines are also evenly spaced, so reading
+    // them would import plausible-looking wrong notes.
+    const staff = [24, 40, 56, 72, 88]
+    const lanes = [150, 185, 220, 255]
+    const overlay = `
+      <div id="tab" style="position:relative;width:700px;height:320px;background:#fff;color:#111">
+        ${staff
+          .map(
+            (y) =>
+              `<div style="position:absolute;left:30px;right:30px;top:${y}px;height:2px;background:#111"></div>`,
+          )
+          .join('')}
+        ${lanes
+          .map(
+            (y) =>
+              `<div style="position:absolute;left:30px;right:30px;top:${y}px;height:2px;background:#111"></div>`,
+          )
+          .join('')}
+        <span style="position:absolute;left:120px;top:${lanes[3] + 1}px;transform:translateY(-50%);background:#fff;padding:0 2px;font:700 20px monospace">3</span>
+        <span style="position:absolute;left:260px;top:${lanes[1] + 1}px;transform:translateY(-50%);background:#fff;padding:0 2px;font:700 20px monospace">9</span>
+      </div>`
+    const image = await screenshotTab(page, 'two-staffs.png', overlay)
+    await openEditor(page)
+    await importImage(page, image)
+
+    await expect(page.locator('.sidebar__notice')).toContainText('1 曲を取り込みました')
+    expect(await notes(page)).toEqual(['E3', 'D9'])
+  })
+
   test('同じ位置に 2 本の弦の数字がある画像は取り込まず、理由を出す', async ({ page }) => {
     const image = await screenshotTab(
       page,

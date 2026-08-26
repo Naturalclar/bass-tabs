@@ -10,6 +10,8 @@ export type TabColumnRegion = {
   string: number
   /** How many digit glyphs the group holds. */
   glyphs: number
+  /** Component labels of those glyphs -- the crop stencil. */
+  labels: number[]
   /** Bounding box of the digit group, in image pixels. */
   x0: number
   y0: number
@@ -26,6 +28,8 @@ export type TabImageAnalysis =
       mask: Uint8Array
       /** Luminance normalised to dark-ink-on-white, antialiasing intact. */
       ink: Uint8Array
+      /** Connected-component label per pixel, -1 where the mask is empty. */
+      labels: Int32Array
       /** Digit groups left to right, each on exactly one string. */
       columns: TabColumnRegion[]
     }
@@ -34,7 +38,7 @@ export type TabImageAnalysis =
 const LANES = 4
 
 /** Otsu's threshold over a 256-bin histogram of luminance. */
-function otsu(histogram: Uint32Array, total: number): number {
+export function otsu(histogram: Uint32Array, total: number): number {
   let sum = 0
   for (let i = 0; i < 256; i++) sum += i * histogram[i]
   let sumBackground = 0
@@ -59,13 +63,84 @@ function otsu(histogram: Uint32Array, total: number): number {
   return threshold
 }
 
+type Band = { top: number; bottom: number; ink: number }
+
+/**
+ * Rows where ink runs a long way across, merged into thin bands. The width
+ * threshold is absolute (a line spans its staff), and a band taller than a
+ * dozen pixels is a filled region, not a drawn line -- on a real screenshot
+ * the page background around the video binarises into exactly such blocks,
+ * and they must not survive to be mistaken for staff lines.
+ */
+function lineBands(mask: Uint8Array, width: number, height: number): Band[] {
+  const rowInk = new Uint32Array(height)
+  for (let y = 0; y < height; y++) {
+    let count = 0
+    for (let x = 0; x < width; x++) count += mask[y * width + x]
+    rowInk[y] = count
+  }
+  const merged: { top: number; bottom: number }[] = []
+  for (let y = 0; y < height; y++) {
+    if (rowInk[y] < width * 0.4) continue
+    const last = merged[merged.length - 1]
+    if (last && y <= last.bottom + 2) last.bottom = y
+    else merged.push({ top: y, bottom: y })
+  }
+  return merged
+    .filter((band) => band.bottom - band.top + 1 <= 12)
+    .map((band) => {
+      let ink = 0
+      for (let y = band.top; y <= band.bottom; y++) ink += rowInk[y]
+      return { ...band, ink: ink / (band.bottom - band.top + 1) }
+    })
+}
+
+const center = (band: Band) => (band.top + band.bottom) / 2
+
+/**
+ * Four evenly spaced bands are a bass tab staff; that geometry is what tells
+ * the staff apart from everything else that binarises into long rows.
+ * Candidate runs are grown greedily from each starting pair and a run is used
+ * only at its full length: a five-line notation staff or a six-string guitar
+ * tab contains four evenly spaced lines too, and reading four of six strings
+ * would import wrong notes that look right.
+ */
+function tabLanes(bands: Band[]): Band[] | null {
+  const runs: Band[][] = []
+  for (let i = 0; i < bands.length; i++) {
+    for (let j = i + 1; j < bands.length; j++) {
+      const gap = center(bands[j]) - center(bands[i])
+      if (gap < 6) continue
+      // Drawn lines land within a pixel or two of even spacing; anything
+      // looser is a coincidence across unrelated lines, and a loose
+      // tolerance let a run mix a notation staff's lines with the tab's.
+      const tolerance = Math.max(3, gap * 0.08)
+      const run = [bands[i], bands[j]]
+      for (let k = j + 1; k < bands.length; k++) {
+        const expected = center(run[run.length - 1]) + gap
+        if (Math.abs(center(bands[k]) - expected) <= tolerance) run.push(bands[k])
+      }
+      if (run.length >= LANES) runs.push(run)
+    }
+  }
+  const contains = (long: Band[], short: Band[]) => short.every((band) => long.includes(band))
+  const candidates = runs.filter(
+    (run) =>
+      run.length === LANES &&
+      !runs.some((other) => other.length > LANES && contains(other, run)),
+  )
+  if (candidates.length === 0) return null
+  // Several staffs on screen: the most line-like one (the most ink) wins.
+  return candidates.reduce((best, run) =>
+    run.reduce((sum, band) => sum + band.ink, 0) > best.reduce((sum, band) => sum + band.ink, 0)
+      ? run
+      : best,
+  )
+}
+
 export function analyzeTabImage(image: ImageData): TabImageAnalysis {
   const { width, height, data } = image
 
-  // Luminance, then Otsu. The tab's ink (lines and digits) is the minority
-  // colour whichever way the video is styled, so foreground is whichever side
-  // of the threshold has fewer pixels -- that is what makes white-on-black
-  // overlays and black-on-white pages the same image from here on.
   const luma = new Uint8Array(width * height)
   const histogram = new Uint32Array(256)
   for (let i = 0; i < width * height; i++) {
@@ -76,38 +151,38 @@ export function analyzeTabImage(image: ImageData): TabImageAnalysis {
     histogram[value]++
   }
   const threshold = otsu(histogram, width * height)
-  let darkCount = 0
-  for (let i = 0; i < luma.length; i++) if (luma[i] <= threshold) darkCount++
-  const inkIsDark = darkCount <= luma.length / 2
-  const mask = new Uint8Array(width * height)
-  const ink = new Uint8Array(width * height)
-  for (let i = 0; i < luma.length; i++) {
-    mask[i] = (inkIsDark ? luma[i] <= threshold : luma[i] > threshold) ? 1 : 0
-    ink[i] = inkIsDark ? luma[i] : 255 - luma[i]
-  }
 
-  // String lines: rows where ink runs most of the way across. Adjacent line
-  // rows merge into one band per string.
-  const rowInk = new Uint32Array(height)
-  for (let y = 0; y < height; y++) {
-    let count = 0
-    for (let x = 0; x < width; x++) count += mask[y * width + x]
-    rowInk[y] = count
+  // Which side of the threshold is the ink? On a bare tab image the minority
+  // side is -- but a screenshot holds dark UI around a bright video (or the
+  // other way around), and a global count answers for the wrong region. So
+  // both polarities are tried, and the one whose long rows form four evenly
+  // spaced lines is the one that was ink.
+  let mask: Uint8Array | null = null
+  let ink: Uint8Array | null = null
+  let lanes: Band[] | null = null
+  for (const inkIsDark of [true, false]) {
+    const tryMask = new Uint8Array(width * height)
+    for (let i = 0; i < luma.length; i++) {
+      tryMask[i] = (inkIsDark ? luma[i] <= threshold : luma[i] > threshold) ? 1 : 0
+    }
+    const tryLanes = tabLanes(lineBands(tryMask, width, height))
+    if (!tryLanes) continue
+    const better =
+      lanes === null ||
+      tryLanes.reduce((sum, band) => sum + band.ink, 0) >
+        lanes.reduce((sum, band) => sum + band.ink, 0)
+    if (better) {
+      mask = tryMask
+      lanes = tryLanes
+      ink = new Uint8Array(width * height)
+      for (let i = 0; i < luma.length; i++) ink[i] = inkIsDark ? luma[i] : 255 - luma[i]
+    }
   }
-  let maxRow = 0
-  for (let y = 0; y < height; y++) maxRow = Math.max(maxRow, rowInk[y])
-  const isLineRow = (y: number) => rowInk[y] >= maxRow * 0.6 && rowInk[y] >= width * 0.3
-  const bands: { top: number; bottom: number }[] = []
-  for (let y = 0; y < height; y++) {
-    if (!isLineRow(y)) continue
-    const last = bands[bands.length - 1]
-    if (last && y <= last.bottom + 2) last.bottom = y
-    else bands.push({ top: y, bottom: y })
-  }
-  if (bands.length !== LANES) return { ok: false, reason: 'no-lanes' }
-  const laneCenters = bands.map((band) => (band.top + band.bottom) / 2)
-  const laneGap =
-    (laneCenters[LANES - 1] - laneCenters[0]) / (LANES - 1)
+  if (!mask || !ink || !lanes) return { ok: false, reason: 'no-lanes' }
+
+  const bands = lanes
+  const laneCenters = bands.map(center)
+  const laneGap = (laneCenters[LANES - 1] - laneCenters[0]) / (LANES - 1)
 
   // The tab's horizontal extent is where the lines actually are; digits from
   // the rest of the screenshot (titles, UI) have no lane under them and are
@@ -135,19 +210,29 @@ export function analyzeTabImage(image: ImageData): TabImageAnalysis {
   // sides within a pixel -- that is a near-vertical stroke, and a stroke is
   // the only thing that legitimately continues through a line.
   for (const band of bands) {
-    const rowAbove = Math.max(0, band.top - 1)
-    const rowBelow = Math.min(height - 1, band.bottom + 1)
     const refill: boolean[] = new Array(width).fill(false)
     for (let x = 0; x < width; x++) {
-      const touches = (row: number) => {
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx
-          if (nx >= 0 && nx < width && mask[row * width + nx]) return true
+      // Two rows of slack on each side: the row hugging the band is where a
+      // stroke's antialiasing lives, and it can fall on the background side
+      // of the threshold -- one row of adjacency then misses real strokes
+      // and bites chunks out of the digits.
+      const touches = (from: number, to: number) => {
+        for (let y = Math.max(0, from); y <= Math.min(height - 1, to); y++) {
+          if (mask[y * width + x]) return true
         }
         return false
       }
-      refill[x] = touches(rowAbove) && touches(rowBelow)
+      refill[x] = touches(band.top - 2, band.top - 1) && touches(band.bottom + 1, band.bottom + 2)
     }
+    // A diagonal stroke crosses the band shifted by a pixel, so its own
+    // column fails the test and the digit splits in two. Bridge a column
+    // when both neighbours qualify -- interior gaps close, but the fill
+    // cannot creep sideways past a stroke's edge: a one-pixel bump beside a
+    // 1 was enough for OCR to read a phantom digit in front of it.
+    const bridged = refill.map(
+      (qualifies, x) => qualifies || (refill[x - 1] === true && refill[x + 1] === true),
+    )
+    for (let x = 0; x < width; x++) refill[x] = bridged[x]
     for (let x = 0; x < width; x++) {
       for (let y = band.top; y <= band.bottom; y++) {
         mask[y * width + x] = refill[x] ? 1 : 0
@@ -202,9 +287,50 @@ export function analyzeTabImage(image: ImageData): TabImageAnalysis {
     components.push(component)
   }
 
+  // A digit sitting right on a line can genuinely not cross it -- a 5's
+  // waist is empty where the line ran -- so erasing the band cuts it into a
+  // top and a bottom piece. Those pieces stack: same columns, a band apart.
+  // Rejoin them before any size filtering, or each half is short enough to
+  // be thrown away as a speck. The labels array keeps both pieces' labels so
+  // the crop stencil still owns every pixel.
+  const merged: (Component & { labels: number[] })[] = components.map((component, label) => ({
+    ...component,
+    labels: [label],
+  }))
+  for (let changed = true; changed; ) {
+    changed = false
+    for (let i = 0; i < merged.length && !changed; i++) {
+      for (let j = i + 1; j < merged.length; j++) {
+        const a = merged[i]
+        const b = merged[j]
+        const overlap = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) + 1
+        const widthA = a.x1 - a.x0 + 1
+        const widthB = b.x1 - b.x0 + 1
+        const verticalGap = Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1) - 1
+        // Strictly stacked (no y overlap, a band-width apart), and of a
+        // similar width: half a digit looks like the other half, and nothing
+        // like the page-background component that happens to share columns.
+        if (verticalGap < 0 || verticalGap > 6) continue
+        if (overlap < Math.min(widthA, widthB) * 0.5) continue
+        if (Math.max(widthA, widthB) > Math.min(widthA, widthB) * 3) continue
+        merged[i] = {
+          x0: Math.min(a.x0, b.x0),
+          y0: Math.min(a.y0, b.y0),
+          x1: Math.max(a.x1, b.x1),
+          y1: Math.max(a.y1, b.y1),
+          area: a.area + b.area,
+          labels: [...a.labels, ...b.labels],
+        }
+        merged.splice(j, 1)
+        changed = true
+        break
+      }
+    }
+  }
+
   // A glyph is ink near a lane, inside the staff, and neither speck nor
   // leftover line fragment.
-  const glyphs = components
+  const glyphs = merged
     .map((component) => {
       const centerY = (component.y0 + component.y1) / 2
       let lane = 0
@@ -219,6 +345,11 @@ export function analyzeTabImage(image: ImageData): TabImageAnalysis {
       const glyphHeight = glyph.y1 - glyph.y0 + 1
       // Line leftovers are far wider than tall; digits never are.
       if (glyphWidth > glyphHeight * 4) return false
+      // A digit stands a good part of the lane gap tall. Stubs a few pixels
+      // high -- the refilled end of an erased line, compression specks --
+      // otherwise ride along in a cluster and OCR reads them as extra digits
+      // (a 12 came back as 312).
+      if (glyphHeight < laneGap * 0.25) return false
       if (glyphHeight > laneGap * 1.5) return false
       if (glyph.laneDistance > laneGap * 0.75) return false
       if (glyph.x1 < tabX0 || glyph.x0 > tabX1) return false
@@ -251,6 +382,7 @@ export function analyzeTabImage(image: ImageData): TabImageAnalysis {
       // the top tab line is G, string 1.
       string: cluster[0].lane + 1,
       glyphs: cluster.length,
+      labels: cluster.flatMap((glyph) => glyph.labels),
       x0: Math.min(...cluster.map((glyph) => glyph.x0)),
       y0: Math.min(...cluster.map((glyph) => glyph.y0)),
       x1: Math.max(...cluster.map((glyph) => glyph.x1)),
@@ -258,5 +390,5 @@ export function analyzeTabImage(image: ImageData): TabImageAnalysis {
     })
   }
 
-  return { ok: true, width, height, mask, ink, columns }
+  return { ok: true, width, height, mask, ink, labels, columns }
 }

@@ -89,7 +89,10 @@ orchestration in the latter. tesseract.js and its assets are self-hosted under `
 are deliberately not guessed: everything imports as eighth notes and the editor is the
 correction UI. The synthetic-screenshot tests in `tests/editor.spec.ts` are the spec for what
 the analyser must survive (both ink polarities, digits crossing the string lines, chords
-refused).
+refused, the staff inside a busy full-page screenshot, a five-line notation staff nearby).
+The staff is found by geometry -- four long, thin, *evenly spaced* lines, tried in both
+polarities -- not by whole-image statistics; a global minority-ink guess broke on the first
+real screenshot (dark browser UI around a bright video).
 
 `src/components/VideoImport.tsx` is video mode: a YouTube embed plus `getDisplayMedia`
 capture feeding the same recogniser (`readTabEntries`), appending to the open score via
