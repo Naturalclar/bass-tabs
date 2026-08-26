@@ -37,6 +37,16 @@ function makePagesScalable(container: HTMLElement): number {
   return pages.length
 }
 
+/**
+ * Puts the page back where it was after a re-render. Restoring only when the
+ * browser actually moved keeps this from fighting a scroll the person started
+ * themselves, and the document may now be shorter, so the browser clamps.
+ */
+function restoreScroll(scrollY: number): void {
+  if (window.scrollY === scrollY) return
+  window.scrollTo({ top: scrollY, behavior: 'instant' })
+}
+
 export function useOsmd() {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const osmdRef = useRef<OpenSheetMusicDisplay | null>(null)
@@ -58,6 +68,12 @@ export function useOsmd() {
     const container = containerRef.current
     if (!osmd || !container) return
 
+    // OSMD tears the whole score DOM down and rebuilds it on every load. While
+    // the container is empty the document has nothing holding the scroll
+    // offset, so the browser resets it -- and the rebuild restores the height
+    // but not the position. Editing is one load per keystroke, so without this
+    // the page jumps to the top on every note.
+    const scrollY = window.scrollY
     setStatus({ kind: 'loading', name })
     try {
       // OSMD unzips .mxl itself when handed a Blob, so .xml and .mxl take the
@@ -68,9 +84,11 @@ export function useOsmd() {
       osmd.render()
       container.style.width = ''
       const pages = makePagesScalable(container)
+      restoreScroll(scrollY)
       setStatus({ kind: 'ready', name, pages })
     } catch (error) {
       container.replaceChildren()
+      restoreScroll(scrollY)
       setStatus({
         kind: 'error',
         name,
