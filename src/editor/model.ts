@@ -21,11 +21,21 @@ export const MAX_MEASURES = 64
 /** A whole note, in divisions. */
 const WHOLE = DIVISIONS * 4
 
-export type Note = {
-  kind: 'note'
+/** One fingered position: which string, which fret. */
+export type Fingering = {
   /** MusicXML string number: 1 is the highest-pitched string, not the lowest. */
   string: number
   fret: number
+}
+
+export type Note = {
+  kind: 'note'
+  /**
+   * The strings sounding on this beat -- one for a single note, several for a
+   * chord. Never empty, never the same string twice, kept sorted by string
+   * number so two ways of entering the same chord are the same value.
+   */
+  notes: Fingering[]
   value: NoteValue
   dotted: boolean
 }
@@ -68,6 +78,11 @@ export function measureRemaining(entries: Entry[], time: TimeSignature): number 
 /** Whether one more entry of this length still fits in the measure. */
 export function fits(entries: Entry[], time: TimeSignature, value: NoteValue, dotted: boolean) {
   return ticks(value, dotted) <= measureRemaining(entries, time)
+}
+
+/** Fingerings in canonical order: string 1 (G) first. */
+export function sortedFingerings(notes: Fingering[]): Fingering[] {
+  return [...notes].sort((a, b) => a.string - b.string)
 }
 
 export function emptyScore(): Score {

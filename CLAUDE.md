@@ -77,6 +77,14 @@ Two things constrain `musicxml.ts`:
 - `DIVISIONS` is 24 because that is the smallest value keeping every supported duration a whole
   number, down to a dotted 16th (9).
 
+A beat (`Note`) holds a `notes` array -- one fingering for a single note, several for a
+chord, unique strings, sorted by string number. Clicking a lane of an existing column
+*toggles* that string in or out (`toggleNoteAt`); the keyboard and MIDI write single notes
+(`putNote`). Removing the last string of a beat leaves a rest, so the rhythm never shifts.
+Arrow-key moves act on the whole chord or not at all. `STORAGE_VERSION` is 3; version 2
+(single-note shape) is lifted in place by `fromVersion2` rather than discarded, because
+people already had scores saved.
+
 Every change to the score goes through `commit()` in `useEditor`, which is also where undo records
 its snapshots — so a new mutation must call `commit()` rather than `setScore` directly, or it will
 be invisible to undo. Passing the same `CommitKey` as the previous commit extends that step instead

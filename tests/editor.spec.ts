@@ -85,7 +85,7 @@ test('the keyboard writes frets, note values and rests', async ({ page }) => {
  * that lands on the cursor instead of the click. These two go the other way:
  * they click a slot the cursor is not on.
  */
-test('clicking an existing note writes at that note, not at the cursor', async ({ page }) => {
+test('clicking an existing column acts on that column, not at the cursor', async ({ page }) => {
   await openEditor(page)
   // Two notes on the E string; the cursor is now past them, at slot 3.
   for (const slot of [1, 2]) {
@@ -95,16 +95,17 @@ test('clicking an existing note writes at that note, not at the cursor', async (
 
   await page.getByRole('button', { name: '1 小節目 1 番目 A 弦' }).click()
 
-  // The first note moved to the A string. No third note appeared. Read the
-  // lanes off the grid rather than out of storage: which string a note sits on
-  // is what the person sees, and the stored shape is free to change.
-  await expect(page.locator('.tab-cell--note')).toHaveCount(2)
+  // The A joined the first column as a chord -- at the clicked slot, not at
+  // the cursor. Read the lanes off the grid rather than out of storage:
+  // which string a note sits on is what the person sees, and the stored
+  // shape is free to change.
+  await expect(page.locator('.tab-cell--note')).toHaveCount(3)
   const lanes = await page
     .locator('.tab-cell--note')
     .evaluateAll((cells) =>
-      cells.map((cell) => cell.getAttribute('aria-label')?.match(/([GDAE]) 弦$/)?.[1]),
+      cells.map((cell) => cell.getAttribute('aria-label')?.match(/(\d+) 番目 ([GDAE]) 弦$/)?.slice(1, 3).join('')),
     )
-  expect(lanes).toEqual(['A', 'E'])
+  expect(lanes).toEqual(['1A', '1E', '2E'])
 })
 
 test('clicking a later measure writes into that measure', async ({ page }) => {
@@ -205,6 +206,138 @@ test('「この小節の残り」は拍子の単位で数える', async ({ page 
   await page.keyboard.press('e')
   await page.keyboard.press('5')
   await expect(remaining).toContainText('この小節の残り: 5 拍')
+})
+
+/**
+ * A beat can be a chord: several strings sounding at once. Clicking builds
+ * and unbuilds it -- a lane of an existing column toggles that string in or
+ * out -- because clicking two lanes of the same column is the obvious way to
+ * ask for a chord, and the same gesture undoes it.
+ */
+test.describe('和音', () => {
+  const cells = (page: Page) =>
+    page
+      .locator('.tab-cell--note')
+      .evaluateAll((all) =>
+        all.map(
+          (cell) =>
+            (cell.getAttribute('aria-label') ?? '').match(/(\d+) 番目 ([GDAE]) 弦$/)?.slice(1, 3).join('') +
+            cell.textContent,
+        ),
+      )
+
+  test('同じ列のレーンをクリックすると和音になり、もう一度で外れる', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('3')
+    await page.getByRole('button', { name: '1 小節目 1 番目 G 弦' }).click()
+    expect(await cells(page)).toEqual(['1G3', '1E3'])
+
+    // The same gesture takes the string out again.
+    await page.getByRole('button', { name: '1 小節目 1 番目 G 弦' }).click()
+    expect(await cells(page)).toEqual(['1E3'])
+
+    // Taking out the last string leaves a rest, not a hole: the beat still
+    // occupies its time and nothing after it shifts.
+    await page.getByRole('button', { name: '1 小節目 1 番目 E 弦' }).click()
+    expect(await cells(page)).toEqual([])
+    await expect(page.locator('.tab-column__rest')).toHaveCount(1)
+  })
+
+  test('和音に足した音のフレットを続く数字で直せる', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('3')
+    await page.getByRole('button', { name: '1 小節目 1 番目 G 弦' }).click()
+    // The digits amend the note the click just added -- the G -- and only it.
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('7')
+    expect(await cells(page)).toEqual(['1G7', '1E3'])
+  })
+
+  test('矢印キーは和音全体を動かし、動けない音がいれば動かない', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('3')
+    await page.getByRole('button', { name: '1 小節目 1 番目 A 弦' }).click()
+    await page.locator('.tab-editor').focus()
+
+    await page.keyboard.press('ArrowUp')
+    expect(await cells(page)).toEqual(['1A4', '1E4'])
+
+    // Four halves down would take the E below the open string: the whole
+    // chord stays, half a chord never moves.
+    for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowDown')
+    expect(await cells(page)).toEqual(['1A0', '1E0'])
+  })
+
+  test('和音は書き出して取り込んでも和音のまま', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('5')
+    await page.getByRole('button', { name: '1 小節目 1 番目 D 弦' }).click()
+
+    const download = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: 'MusicXML を書き出す' }).click(),
+    ]).then(([event]) => event)
+    // Not testInfo.outputPath: the Japanese test title makes that directory
+    // non-ASCII, and setInputFiles silently attaches nothing (the trap in
+    // CLAUDE.md).
+    const saved = join(mkdtempSync(join(tmpdir(), 'bass-tabs-')), 'chord.musicxml')
+    await download.saveAs(saved)
+
+    await page.setInputFiles('.sidebar input[type="file"]', saved)
+    await expect(page.locator('.sidebar__notice')).toContainText('1 曲を取り込みました')
+    expect(await cells(page)).toEqual(['1D5', '1E5'])
+  })
+
+  test('和音入りの譜面も A4 で印刷できる', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('3')
+    await page.getByRole('button', { name: '1 小節目 1 番目 G 弦' }).click()
+
+    await expect(page.getByRole('status').first()).toContainText('ページ (A4 縦)')
+    const pdf = await page.pdf({ preferCSSPageSize: true })
+    expect(pdfPageCount(pdf)).toBe(1)
+    const size = pdfPageSizeMm(pdf)
+    expect(size.width).toBeCloseTo(210, 0)
+    expect(size.height).toBeCloseTo(297, 0)
+  })
+
+  test('旧形式 (v2) の保存データが和音対応後も読める', async ({ page }) => {
+    await openEditor(page)
+    // A saved library exactly as version 2 wrote it: single-note entries
+    // with string/fret on the entry itself. It must come back as playable
+    // notes, not be silently discarded over a field move.
+    await page.evaluate(() => {
+      localStorage.clear()
+      const score = {
+        title: '旧形式',
+        keyFifths: 0,
+        time: { beats: 4, beatType: 4 },
+        measures: [
+          [
+            { kind: 'note', string: 4, fret: 3, value: 4, dotted: false },
+            { kind: 'rest', value: 4, dotted: false },
+          ],
+          [],
+        ],
+      }
+      localStorage.setItem('bass-tabs:score:old-id', JSON.stringify({ version: 2, score }))
+      localStorage.setItem(
+        'bass-tabs:index',
+        JSON.stringify({ version: 2, ids: ['old-id'], currentId: 'old-id' }),
+      )
+    })
+    await page.reload()
+    await page.locator('.tab-editor').waitFor()
+
+    await expect(page.locator('.score-row--current')).toContainText('旧形式')
+    expect(await cells(page)).toEqual(['1E3'])
+    await expect(page.locator('.tab-column__rest')).toHaveCount(1)
+  })
 })
 
 /**
@@ -1065,15 +1198,38 @@ test.describe('書き出しと取り込み', () => {
     await expect(page.locator('.score-row')).toHaveCount(2)
   })
 
-  test('和音入りの MusicXML は取り込まず、理由を出す', async ({ page }) => {
+  test('和音入りの MusicXML を和音のまま取り込める', async ({ page }) => {
     await openEditor(page)
 
+    // A chord tone rides the previous note's beat: one column, two strings.
     const chord = quarterOn(4, 0) + quarterOn(3, 2, '<chord/>')
     await page.setInputFiles(
       '.sidebar input[type="file"]',
       fixture('chord.musicxml', tabXml(1, chord)),
     )
-    await expect(page.locator('.sidebar__notice')).toContainText('和音・タイ・装飾音')
+    await expect(page.locator('.sidebar__notice')).toContainText('1 曲を取り込みました')
+    const cells = await page
+      .locator('.tab-cell--note')
+      .evaluateAll((all) =>
+        all.map(
+          (cell) =>
+            (cell.getAttribute('aria-label') ?? '').match(/(\d+) 番目 ([GDAE]) 弦$/)?.slice(1, 3).join('') +
+            cell.textContent,
+        ),
+      )
+    expect(cells).toEqual(['1A2', '1E0'])
+  })
+
+  test('同じ弦が 2 回鳴る和音は取り込まず、理由を出す', async ({ page }) => {
+    await openEditor(page)
+
+    // The one chord the model cannot spell: both tones on the same string.
+    const doubled = quarterOn(4, 0) + quarterOn(4, 5, '<chord/>')
+    await page.setInputFiles(
+      '.sidebar input[type="file"]',
+      fixture('doubled.musicxml', tabXml(1, doubled)),
+    )
+    await expect(page.locator('.sidebar__notice')).toContainText('タイ・装飾音')
     await expect(page.locator('.score-row')).toHaveCount(1)
   })
 
@@ -1085,7 +1241,7 @@ test.describe('書き出しと取り込み', () => {
       '.sidebar input[type="file"]',
       fixture('tie.musicxml', tabXml(1, tied)),
     )
-    await expect(page.locator('.sidebar__notice')).toContainText('和音・タイ・装飾音')
+    await expect(page.locator('.sidebar__notice')).toContainText('タイ・装飾音')
     await expect(page.locator('.score-row')).toHaveCount(1)
   })
 
@@ -1381,7 +1537,8 @@ test.describe('画像からの取り込み', () => {
     await expect(page.locator('.tab-column__rest')).toHaveCount(1)
   })
 
-  test('同じ位置に 2 本の弦の数字がある画像は取り込まず、理由を出す', async ({ page }) => {
+  test('同じ位置に 2 本の弦の数字がある画像は和音として取り込める', async ({ page }) => {
+    test.setTimeout(120_000)
     const image = await screenshotTab(
       page,
       'chord.png',
@@ -1395,8 +1552,18 @@ test.describe('画像からの取り込み', () => {
     await openEditor(page)
     await importImage(page, image)
 
-    await expect(page.locator('.sidebar__notice')).toContainText('和音は持てない')
-    await expect(page.locator('.score-row')).toHaveCount(1)
+    await expect(page.locator('.sidebar__notice')).toContainText('1 曲を取り込みました')
+    // One beat, two strings: the same column holds both.
+    const cells = await page
+      .locator('.tab-cell--note')
+      .evaluateAll((all) =>
+        all.map(
+          (cell) =>
+            (cell.getAttribute('aria-label') ?? '').match(/(\d+) 番目 ([GDAE]) 弦$/)?.slice(1, 3).join('') +
+            cell.textContent,
+        ),
+      )
+    expect(cells).toEqual(['1G3', '1A5'])
   })
 
   test('弦の線が無い画像は取り込まず、理由を出す', async ({ page }) => {

@@ -3,6 +3,7 @@ import {
   NOTE_VALUES,
   emptyScore,
   measureRemaining,
+  sortedFingerings,
   type Entry,
   type NoteValue,
   type Score,
@@ -37,6 +38,8 @@ export type MusicXmlImport =
   | { ok: true; score: Score }
   | { ok: false; reason: 'unreadable' | 'no-tab' | 'unsupported' | 'too-long' | 'overfull' }
 
+type Fingering = { string: number; fret: number }
+
 function text(parent: ParentNode | null, selector: string): string | null {
   return parent?.querySelector(selector)?.textContent?.trim() ?? null
 }
@@ -56,6 +59,15 @@ function tabStaffNumber(part: Element): string | null {
   return null
 }
 
+function fingeringOf(note: Element): Fingering | null {
+  const technical = note.querySelector('technical')
+  const string = Number(text(technical, 'string'))
+  const fret = Number(text(technical, 'fret'))
+  if (!STRINGS.some((entry) => entry.number === string)) return null
+  if (!Number.isInteger(fret) || fret < 0 || fret > MAX_FRET) return null
+  return { string, fret }
+}
+
 function entryOf(note: Element): Entry | null {
   const value = VALUE_BY_TYPE[text(note, 'type') ?? '']
   if (!value || !(NOTE_VALUES as readonly number[]).includes(value)) return null
@@ -63,12 +75,8 @@ function entryOf(note: Element): Entry | null {
 
   if (note.querySelector('rest')) return { kind: 'rest', value, dotted }
 
-  const technical = note.querySelector('technical')
-  const string = Number(text(technical, 'string'))
-  const fret = Number(text(technical, 'fret'))
-  if (!STRINGS.some((entry) => entry.number === string)) return null
-  if (!Number.isInteger(fret) || fret < 0 || fret > MAX_FRET) return null
-  return { kind: 'note', string, fret, value, dotted }
+  const fingering = fingeringOf(note)
+  return fingering === null ? null : { kind: 'note', notes: [fingering], value, dotted }
 }
 
 export function fromMusicXml(xml: string): MusicXmlImport {
@@ -97,13 +105,27 @@ export function fromMusicXml(xml: string): MusicXmlImport {
     for (const note of measure.querySelectorAll('note')) {
       // Every event is written on both staves; reading one keeps each once.
       if (text(note, 'staff') !== staff) continue
-      // Chords, ties (either spelling) and grace notes have no representation
-      // in the model.
-      // Dropping the markup and keeping the notes would import each chord
-      // tone as its own beat and each tied pair as two attacks -- a score
-      // that looks like the original but is not -- so the file is refused,
-      // which is what the contract at the top of this file promises.
-      if (note.querySelector('chord, tie, tied, grace')) return { ok: false, reason: 'unsupported' }
+      // Ties (either spelling) and grace notes have no representation in the
+      // model. Dropping the markup and keeping the notes would import each
+      // tied pair as two attacks -- a score that looks like the original but
+      // is not -- so the file is refused, which is what the contract at the
+      // top of this file promises.
+      if (note.querySelector('tie, tied, grace')) return { ok: false, reason: 'unsupported' }
+      // A <chord/> note shares the previous note's beat: it joins that entry
+      // instead of becoming its own. Two chord tones on the same string is a
+      // file the model cannot spell, so it is refused, not half-kept.
+      if (note.querySelector('chord')) {
+        const previous = entries[entries.length - 1]
+        const fingering = fingeringOf(note)
+        if (!previous || previous.kind !== 'note' || fingering === null) {
+          return { ok: false, reason: 'unsupported' }
+        }
+        if (previous.notes.some((existing) => existing.string === fingering.string)) {
+          return { ok: false, reason: 'unsupported' }
+        }
+        previous.notes = sortedFingerings([...previous.notes, fingering])
+        continue
+      }
       const entry = entryOf(note)
       if (entry) entries.push(entry)
     }

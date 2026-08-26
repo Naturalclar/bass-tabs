@@ -4,6 +4,7 @@ import {
   emptyScore,
   fits,
   measureRemaining,
+  sortedFingerings,
   type Entry,
   type NoteValue,
   type Score,
@@ -202,6 +203,10 @@ export function useEditor() {
     [commit, score],
   )
 
+  /**
+   * Writes a single note (replacing whatever the slot held) -- the keyboard's
+   * and MIDI's entry point. Chords are built by clicking, via `toggleNoteAt`.
+   */
   const putNote = useCallback(
     (targetString: number, atFret: number, at: Cursor = cursor) => {
       const clamped = Math.min(Math.max(atFret, 0), MAX_FRET)
@@ -210,9 +215,55 @@ export function useEditor() {
       setFret(clamped)
       setStringNumber(targetString)
       // Keyed on where it lands, so the fret digits that follow amend that step.
-      return place({ kind: 'note', string: targetString, fret: clamped, value, dotted }, at, 'fret')
+      const slot = place(
+        { kind: 'note', notes: [{ string: targetString, fret: clamped }], value, dotted },
+        at,
+        'fret',
+      )
+      return slot === null ? null : { at: slot, string: targetString }
     },
     [cursor, dotted, place, value],
+  )
+
+  /**
+   * The click's entry point: a lane of an existing column toggles that string
+   * in or out of the beat, which is how a chord is built -- click the second
+   * string of the same column -- and how one note of it is taken out again.
+   * Taking out the last one leaves a rest, not a hole: the beat was played
+   * empty, it did not stop existing, and the rhythm around it must not shift.
+   * Past the written columns it writes a fresh note, same as the keyboard.
+   */
+  const toggleNoteAt = useCallback(
+    (at: Cursor, targetString: number): { at: Cursor; string: number } | null => {
+      const entries = score.measures[at.measure] ?? []
+      const entry = entries[at.index]
+      if (!entry || entry.kind === 'rest') return putNote(targetString, fret, at)
+
+      const existing = entry.notes.find((note) => note.string === targetString)
+      const notes = existing
+        ? entry.notes.filter((note) => note.string !== targetString)
+        : sortedFingerings([...entry.notes, { string: targetString, fret }])
+      const next: Entry =
+        notes.length > 0 ? { ...entry, notes } : { kind: 'rest', value: entry.value, dotted: entry.dotted }
+      if (!existing) {
+        setStringNumber(targetString)
+      }
+      commit(
+        {
+          ...score,
+          measures: score.measures.map((measure, i) =>
+            i !== at.measure
+              ? measure
+              : measure.map((current, j) => (j === at.index ? next : current)),
+          ),
+        },
+        { measure: at.measure, index: at.index },
+      )
+      // Only an added note wants the fret digits that follow; a removal has
+      // nothing for them to amend.
+      return existing ? null : { at, string: targetString }
+    },
+    [commit, fret, putNote, score],
   )
 
   /**
@@ -221,7 +272,7 @@ export function useEditor() {
    * not write a new one after it.
    */
   const setFretAt = useCallback(
-    (at: Cursor, atFret: number) => {
+    (at: Cursor, targetString: number, atFret: number) => {
       const clamped = Math.min(Math.max(atFret, 0), MAX_FRET)
       setFret(clamped)
       commit(
@@ -231,7 +282,14 @@ export function useEditor() {
             i !== at.measure
               ? entries
               : entries.map((entry, j) =>
-                  j === at.index && entry.kind === 'note' ? { ...entry, fret: clamped } : entry,
+                  j === at.index && entry.kind === 'note'
+                    ? {
+                        ...entry,
+                        notes: entry.notes.map((note) =>
+                          note.string === targetString ? { ...note, fret: clamped } : note,
+                        ),
+                      }
+                    : entry,
                 ),
           ),
         },
@@ -518,13 +576,18 @@ export function useEditor() {
       const entries = score.measures[cursor.measure] ?? []
       const entry = entries[index]
       if (entry.kind !== 'note') return
-      const moved = semitones
-        ? transpose({ string: entry.string, fret: entry.fret }, semitones)
-        : restring({ string: entry.string, fret: entry.fret }, strings)
-      if (!moved) return
-      // The next note follows the string and fret this one ended on.
-      setStringNumber(moved.string)
-      setFret(moved.fret)
+      // The whole beat moves together, or not at all: half a chord shifting
+      // is never what an arrow key meant. A move that would land two notes on
+      // the same string has nowhere coherent to go either.
+      const moved = entry.notes.map((note) =>
+        semitones ? transpose(note, semitones) : restring(note, strings),
+      )
+      if (moved.some((note) => note === null)) return
+      const landed = sortedFingerings(moved as { string: number; fret: number }[])
+      if (new Set(landed.map((note) => note.string)).size !== landed.length) return
+      // The next note follows the string and fret the first one ended on.
+      setStringNumber(landed[0].string)
+      setFret(landed[0].fret)
       commit(
         {
           ...score,
@@ -532,7 +595,7 @@ export function useEditor() {
             i !== cursor.measure
               ? measure
               : measure.map((existing, j) =>
-                  j === index ? { ...entry, string: moved.string, fret: moved.fret } : existing,
+                  j === index ? { ...entry, notes: landed } : existing,
                 ),
           ),
         },
@@ -582,6 +645,7 @@ export function useEditor() {
     moveNote,
     setFretAt,
     putRest,
+    toggleNoteAt,
     appendEntries,
     removeAtCursor,
     moveCursor,

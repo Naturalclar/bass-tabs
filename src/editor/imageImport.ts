@@ -16,7 +16,7 @@ import { analyzeTabImage, otsu } from './tabImage.ts'
 
 export type ImageImport =
   | { ok: true; score: Score; unread: number }
-  | { ok: false; reason: 'unreadable' | 'no-lanes' | 'chord' | 'no-notes' | 'too-long' }
+  | { ok: false; reason: 'unreadable' | 'no-lanes' | 'no-notes' | 'too-long' }
 
 /** All OCR assets are served by this site itself: no CDN at runtime. */
 const OCR_BASE = `${import.meta.env.BASE_URL}ocr/`
@@ -133,7 +133,7 @@ function intoMeasures(entries: Entry[], score: Omit<Score, 'measures'>): Entry[]
 
 export type TabEntriesResult =
   | { ok: true; entries: Entry[]; unread: number }
-  | { ok: false; reason: 'no-lanes' | 'chord' | 'no-notes' }
+  | { ok: false; reason: 'no-lanes' | 'no-notes' }
 
 /**
  * One OCR worker for the whole session, created on first use. A video-mode
@@ -180,29 +180,37 @@ export async function readTabEntries(image: ImageData): Promise<TabEntriesResult
   }
   const isFret = (value: number) => Number.isInteger(value) && value >= 0 && value <= MAX_FRET
   for (const column of analysis.columns) {
-    const crop = cropForOcr(analysis, column)
-    let fret = await read(crop)
-    // A single tight glyph sometimes comes back empty in word mode -- a
-    // bold 0 whose counter is nearly closed, for one. Only then is it worth
-    // a second look in single-character mode; a *wrong* first answer gives
-    // no such signal, so this is a retry on silence, not a vote.
-    if (!isFret(fret) && column.glyphs === 1) {
-      await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_CHAR })
-      fret = await read(crop)
-      await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_WORD })
+    // Each string of the beat is its own OCR read; several readable parts
+    // make the beat a chord. A part the OCR cannot read is counted, and if
+    // nothing in the column was readable the beat becomes a rest -- a gap
+    // someone can see and fix beats a note silently missing.
+    const fingerings: { string: number; fret: number }[] = []
+    for (const part of column.parts) {
+      const crop = cropForOcr(analysis, part)
+      let fret = await read(crop)
+      // A single tight glyph sometimes comes back empty in word mode -- a
+      // bold 0 whose counter is nearly closed, for one. Only then is it worth
+      // a second look in single-character mode; a *wrong* first answer gives
+      // no such signal, so this is a retry on silence, not a vote.
+      if (!isFret(fret) && part.glyphs === 1) {
+        await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_CHAR })
+        fret = await read(crop)
+        await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_WORD })
+      }
+      // Erasing the line can maim a digit whose stroke opens right at the
+      // band -- a 6 loses its right shoulder and reads as nothing. When the
+      // clean crop says nothing at all, the un-erased crop (line and all)
+      // gets a turn; the digit is whole there, and OCR handles a short
+      // strikethrough better than a missing stroke.
+      if (!isFret(fret)) {
+        fret = await read(cropForOcr(analysis, part, true))
+      }
+      if (isFret(fret)) fingerings.push({ string: part.string, fret })
+      else unread++
     }
-    // Erasing the line can maim a digit whose stroke opens right at the
-    // band -- a 6 loses its right shoulder and reads as nothing. When the
-    // clean crop says nothing at all, the un-erased crop (line and all)
-    // gets a turn; the digit is whole there, and OCR handles a short
-    // strikethrough better than a missing stroke.
-    if (!isFret(fret)) {
-      fret = await read(cropForOcr(analysis, column, true))
-    }
-    if (isFret(fret)) {
-      entries.push({ kind: 'note', string: column.string, fret, value: IMPORT_VALUE, dotted: false })
+    if (fingerings.length > 0) {
+      entries.push({ kind: 'note', notes: fingerings, value: IMPORT_VALUE, dotted: false })
     } else {
-      unread++
       entries.push({ kind: 'rest', value: IMPORT_VALUE, dotted: false })
     }
   }
