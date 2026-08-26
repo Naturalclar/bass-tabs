@@ -93,7 +93,10 @@ Editing is split in three. `edit.ts` holds the score transformations as pure fun
 in, `Score` out; null means "this edit has nowhere to go") — tested directly in
 `tests/editor-input.spec.ts`, the same way playback's `schedule()` is. `useLibrary.ts` owns which
 scores exist, which is open, and the localStorage writes. `useEditor.ts` connects the two:
-cursor, undo history, and `commit()`.
+cursor, undo history, and `commit()`. Around them, `useEditorKeyboard.ts` is the tab editor's
+keyboard scheme (including the run of digits that makes "1" then "2" fret 12), and
+`importFile.ts` maps an imported file — image, library JSON, or MusicXML — to scores plus the
+notice to show, never throwing; so `App.tsx` is wiring, not implementation.
 
 Every change to the score goes through `commit()` in `useEditor`, which is also where undo records
 its snapshots — so a new mutation must call `commit()` rather than `setScore` directly, or it will
@@ -138,10 +141,11 @@ only input nothing type-checks — it was written by whatever version of the cod
 shape the app cannot read fails on *every* reload with no way back from the UI. Change `Score` in a
 way the validator would still accept (a renamed field, a changed unit) and bump `STORAGE_VERSION`.
 
-Anything that remembers a position in the score — the digit run in `App.tsx`, the undo history —
-has to be cleared when the open score changes, or it will address the score that was left. The
-editor's own state does this by itself (the `currentId` seam above); the digit run in `App.tsx`
-still clears by hand at every call site.
+Anything that remembers a position in the score — the undo history, the keyboard's run of
+digits — has to be cleared when the open score changes, or it will address the score that was
+left. Both reset themselves on the `currentId` seam: the editor's state in `useEditor`, the
+digit run in `useEditorKeyboard`. Nothing outside those two files should grow such state without
+joining that seam.
 
 The notation staff is written an octave above sounding pitch, as bass parts are. That shift lives
 only in `musicxml.ts` (`WRITTEN_OCTAVE_SHIFT`) — `tuning.ts` stays at sounding pitch, which is what
