@@ -10,10 +10,12 @@ Vite + React + TypeScript, rendering via OpenSheetMusicDisplay (OSMD).
 It also has a tab editor, so a score can be written in the app instead of imported — but only as a
 way to get something onto paper.
 
-Explicitly out of scope: playback, cursor following, tempo control, section looping. Anything
-"follow along on screen while playing" belongs to a separate alphaTab experiment, not here. A
-feature request phrased as "it would be nice while practicing" is usually this, so check before
-building it.
+Explicitly out of scope: cursor following, follow-along scrolling, section looping, tempo
+changes while playing. Anything "follow along on screen while playing" belongs to a separate
+alphaTab experiment, not here. A feature request phrased as "it would be nice while practicing"
+is usually this, so check before building it. Playback itself exists, but only as a proofing
+tool: one run from the top at a playback-only BPM, to hear whether the entered notes are right
+before printing them — it deliberately grows none of the follow-along features above.
 
 ## Commands
 
@@ -124,6 +126,15 @@ the fret arithmetic and MIDI input are about. The file declares `<transpose>` wi
 `octave-change: -1` so it still states the real pitch; OSMD ignores that for display, which is what
 lets both be true at once. Written at pitch, the open E string needs three ledger lines: measured on
 the two-page sample, 201 ledger-line elements against 10.
+
+`src/editor/playback.ts` + `usePlayback.ts` are the proofing playback (再生/停止 in the editor
+panel). The note list is built from the `Score` model directly — never from the MusicXML or the
+rendered page — so `WRITTEN_OCTAVE_SHIFT` does not apply and notes sound at real pitch, which is
+the point of the shift living only in `musicxml.ts`. `schedule()` is a pure function and is
+tested without an AudioContext in `tests/editor.spec.ts`; the hook is the only code touching Web
+Audio. BPM is a playback-only setting — `Score` has no tempo field and the stored shape is
+unchanged. Playback stops when the open score changes, per the rule below about remembered
+positions, and when leaving the editor (in video mode it would bleed into the capture).
 
 MusicXML's two numbering schemes run in opposite directions and are the easiest thing to break:
 `<string>` counts from the highest-pitched string (G is 1), `<staff-tuning line>` counts from the

@@ -7,6 +7,7 @@ import {
   type TimeSignature,
 } from '../editor/model.ts'
 import { MAX_FRET } from '../editor/tuning.ts'
+import { MAX_BPM, MIN_BPM } from '../editor/playback.ts'
 import type { MidiStatus } from '../editor/useMidiInput.ts'
 
 type Props = {
@@ -19,6 +20,11 @@ type Props = {
   fret: number
   remaining: number
   midi: MidiStatus
+  playing: boolean
+  canPlay: boolean
+  bpm: number
+  onBpm: (bpm: number) => void
+  onTogglePlay: () => void
   onTitle: (title: string) => void
   onTime: (time: TimeSignature) => void
   onKeyFifths: (fifths: number) => void
@@ -135,6 +141,39 @@ function MeasureCountField({
   )
 }
 
+/**
+ * Playback tempo. Values inside the range apply as they are typed; anything
+ * else stays a draft and snaps back on blur. Nothing is lost by a wrong
+ * intermediate value here -- the BPM only steers the speaker -- so this can be
+ * looser than MeasureCountField, which guards actual score content.
+ */
+function BpmField({ bpm, onBpm }: { bpm: number; onBpm: (bpm: number) => void }) {
+  const [draft, setDraft] = useState(String(bpm))
+  const [shown, setShown] = useState(bpm)
+  if (bpm !== shown) {
+    setShown(bpm)
+    setDraft(String(bpm))
+  }
+
+  return (
+    <label className="editor-field">
+      BPM
+      <input
+        type="number"
+        min={MIN_BPM}
+        max={MAX_BPM}
+        value={draft}
+        onChange={(e) => {
+          setDraft(e.target.value)
+          const parsed = Number(e.target.value)
+          if (Number.isFinite(parsed) && parsed >= MIN_BPM && parsed <= MAX_BPM) onBpm(parsed)
+        }}
+        onBlur={() => setDraft(String(bpm))}
+      />
+    </label>
+  )
+}
+
 export function EditorPanel(props: Props) {
   return (
     <section className="editor-panel">
@@ -231,6 +270,18 @@ export function EditorPanel(props: Props) {
       </div>
 
       <div className="editor-row">
+        {/* Proofing playback: one run from the top, to hear whether the
+            entered notes are right before printing them. No cursor, no loop. */}
+        <button
+          type="button"
+          className="button"
+          aria-pressed={props.playing}
+          onClick={props.onTogglePlay}
+          disabled={!props.playing && !props.canPlay}
+        >
+          {props.playing ? '停止' : '再生'}
+        </button>
+        <BpmField bpm={props.bpm} onBpm={props.onBpm} />
         <button
           type="button"
           className="button"

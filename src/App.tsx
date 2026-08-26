@@ -12,6 +12,7 @@ import { fromBackup, toBackup } from './editor/backup.ts'
 import { fromMusicXml } from './editor/musicxmlImport.ts'
 import { fromTabImage } from './editor/imageImport.ts'
 import { useMidiInput } from './editor/useMidiInput.ts'
+import { usePlayback } from './editor/usePlayback.ts'
 import { MAX_MEASURES, NOTE_VALUES, type NoteValue } from './editor/model.ts'
 import { MAX_FRET, STRINGS } from './editor/tuning.ts'
 
@@ -49,6 +50,16 @@ export default function App() {
   }, [editor.musicXml, editor.score.title, loadScore, mode])
 
   const midi = useMidiInput(editor.putNote)
+
+  const playback = usePlayback(editor.score)
+  const stopPlayback = playback.stop
+  // Sound addresses the score that was playing when it started. Switching
+  // scores -- or leaving the editor, where in video mode it would bleed into
+  // the capture -- stops it: the same rule as everything else that remembers
+  // a position in the score.
+  useEffect(() => {
+    stopPlayback()
+  }, [editor.currentId, mode, stopPlayback])
 
   /**
    * The note the last placement wrote, so a following digit edits it rather
@@ -361,6 +372,11 @@ export default function App() {
             fret={editor.fret}
             remaining={editor.remaining}
             midi={midi.status}
+            playing={playback.playing}
+            canPlay={playback.canPlay}
+            bpm={playback.bpm}
+            onBpm={playback.setBpm}
+            onTogglePlay={playback.playing ? playback.stop : playback.play}
             onTitle={editor.setTitle}
             onTime={editor.setTime}
             onKeyFifths={editor.setKeyFifths}
