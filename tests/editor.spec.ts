@@ -76,6 +76,45 @@ test('the keyboard writes frets, note values and rests', async ({ page }) => {
   await expect(page.locator('svg.score-page')).toHaveCount(1)
 })
 
+/**
+ * `fillFirstMeasure` clicks slots 1..4 in order, which is the one case where
+ * the clicked slot and the advancing cursor agree -- so it cannot see a write
+ * that lands on the cursor instead of the click. These two go the other way:
+ * they click a slot the cursor is not on.
+ */
+test('clicking an existing note writes at that note, not at the cursor', async ({ page }) => {
+  await openEditor(page)
+  // Two notes on the E string; the cursor is now past them, at slot 3.
+  for (const slot of [1, 2]) {
+    await page.getByRole('button', { name: `1 小節目 ${slot} 番目 E 弦` }).click()
+  }
+  await expect(page.locator('.tab-cell--note')).toHaveCount(2)
+
+  await page.getByRole('button', { name: '1 小節目 1 番目 A 弦' }).click()
+
+  // The first note moved to the A string. No third note appeared.
+  await expect(page.locator('.tab-cell--note')).toHaveCount(2)
+  const strings = await page.locator('svg.score-page').first().evaluate(() => {
+    const stored = localStorage.getItem('bass-tabs:score')
+    const score = JSON.parse(stored ?? '{}') as { measures: { string?: number }[][] }
+    return score.measures[0].map((entry) => entry.string)
+  })
+  expect(strings).toEqual([3, 4])
+})
+
+test('clicking a later measure writes into that measure', async ({ page }) => {
+  await openEditor(page)
+  await page.getByRole('button', { name: '1 小節目 1 番目 E 弦' }).click()
+
+  // The cursor is in measure 1; this click is in measure 3.
+  await page.getByRole('button', { name: '3 小節目 1 番目 G 弦' }).click()
+
+  const perMeasure = await page.locator('.tab-measure').evaluateAll((nodes) =>
+    nodes.map((node) => node.querySelectorAll('.tab-cell--note').length),
+  )
+  expect(perMeasure).toEqual([1, 0, 1, 0])
+})
+
 test('a measure cannot be overfilled past its time signature', async ({ page }) => {
   await openEditor(page)
   await fillFirstMeasure(page, 'E')

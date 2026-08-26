@@ -5,8 +5,8 @@ import type { Cursor } from '../editor/useEditor.ts'
 type Props = {
   measures: Entry[][]
   cursor: Cursor
-  onSelect: (cursor: Cursor) => void
-  onPlace: (stringNumber: number) => void
+  /** Writes at the clicked slot; the cursor follows from the write. */
+  onPlace: (at: Cursor, stringNumber: number) => void
   onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void
 }
 
@@ -22,8 +22,10 @@ function entryLabel(entry: Entry): string {
  *
  * Clicking a lane writes there, which is both the click entry method and the
  * way the cursor moves. The trailing column of each measure is the append slot.
+ * The click passes its own slot to the writer rather than moving the cursor and
+ * letting the write find it -- see `place()` in useEditor for why.
  */
-export function TabEditor({ measures, cursor, onSelect, onPlace, onKeyDown }: Props) {
+export function TabEditor({ measures, cursor, onPlace, onKeyDown }: Props) {
   return (
     <div
       className="tab-editor"
@@ -54,10 +56,7 @@ export function TabEditor({ measures, cursor, onSelect, onPlace, onKeyDown }: Pr
                         className={`tab-cell${here ? ' tab-cell--note' : ''}`}
                         key={string.number}
                         aria-label={`${measureIndex + 1} 小節目 ${index + 1} 番目 ${string.label} 弦`}
-                        onClick={() => {
-                          onSelect({ measure: measureIndex, index })
-                          onPlace(string.number)
-                        }}
+                        onClick={() => onPlace({ measure: measureIndex, index }, string.number)}
                       >
                         {here ? entry.fret : entry?.kind === 'rest' ? '' : '−'}
                       </button>

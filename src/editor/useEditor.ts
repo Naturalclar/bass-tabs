@@ -67,39 +67,44 @@ export function useEditor() {
   const musicXml = useMemo(() => toMusicXml(score), [score])
 
   /**
-   * Writes one entry at the cursor: replacing the entry under it, or appending
-   * when the cursor sits past the end. Whether the write happened decides
-   * whether the cursor advances -- advancing after a rejected append would
-   * leave the cursor pointing into a gap past the end of the measure.
+   * Writes one entry at `at`: replacing the entry under it, or appending when
+   * it sits past the end. Whether the write happened decides whether the cursor
+   * advances -- advancing after a rejected append would leave the cursor
+   * pointing into a gap past the end of the measure.
+   *
+   * The target is an argument rather than the current cursor because a click
+   * knows where it landed. Moving the cursor first and placing afterwards
+   * cannot work: both happen in one handler, so the place would still read the
+   * pre-click cursor out of its closure and write to the wrong slot.
    */
   const place = useCallback(
-    (entry: Entry): Cursor | null => {
-      const entries = score.measures[cursor.measure] ?? []
-      const replacing = cursor.index < entries.length
+    (entry: Entry, at: Cursor): Cursor | null => {
+      const entries = score.measures[at.measure] ?? []
+      const replacing = at.index < entries.length
       if (!replacing && !fits(entries, score.time, entry.value, entry.dotted)) return null
       const next = replacing
-        ? entries.map((existing, i) => (i === cursor.index ? entry : existing))
+        ? entries.map((existing, i) => (i === at.index ? entry : existing))
         : [...entries, entry]
       setScore((current) => ({
         ...current,
-        measures: current.measures.map((existing, i) => (i === cursor.measure ? next : existing)),
+        measures: current.measures.map((existing, i) => (i === at.measure ? next : existing)),
       }))
-      setCursor((c) => ({ ...c, index: Math.min(c.index + 1, next.length) }))
-      return { measure: cursor.measure, index: cursor.index }
+      setCursor({ measure: at.measure, index: Math.min(at.index + 1, next.length) })
+      return at
     },
-    [cursor, score],
+    [score],
   )
 
   const putNote = useCallback(
-    (targetString: number, atFret: number) => {
+    (targetString: number, atFret: number, at: Cursor = cursor) => {
       const clamped = Math.min(Math.max(atFret, 0), MAX_FRET)
       // Placing also moves the keyboard's idea of where it is, so clicking a
       // lane and then typing a fret keeps working on that same string.
       setFret(clamped)
       setStringNumber(targetString)
-      return place({ kind: 'note', string: targetString, fret: clamped, value, dotted })
+      return place({ kind: 'note', string: targetString, fret: clamped, value, dotted }, at)
     },
-    [dotted, place, value],
+    [cursor, dotted, place, value],
   )
 
   /**
@@ -122,9 +127,12 @@ export function useEditor() {
     }))
   }, [])
 
-  const putRest = useCallback(() => {
-    place({ kind: 'rest', value, dotted })
-  }, [dotted, place, value])
+  const putRest = useCallback(
+    (at: Cursor = cursor) => {
+      place({ kind: 'rest', value, dotted }, at)
+    },
+    [cursor, dotted, place, value],
+  )
 
   const removeAtCursor = useCallback(() => {
     setScore((current) => ({
@@ -209,7 +217,6 @@ export function useEditor() {
     score,
     musicXml,
     cursor,
-    setCursor,
     value,
     setValue,
     dotted,

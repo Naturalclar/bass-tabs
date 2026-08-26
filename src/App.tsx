@@ -168,9 +168,8 @@ export default function App() {
           <TabEditor
             measures={editor.score.measures}
             cursor={editor.cursor}
-            onSelect={editor.setCursor}
-            onPlace={(stringNumber) =>
-              recordPlacement(editor.putNote(stringNumber, editor.fret), null)
+            onPlace={(at, stringNumber) =>
+              recordPlacement(editor.putNote(stringNumber, editor.fret, at), null)
             }
             onKeyDown={handleKeyDown}
           />
