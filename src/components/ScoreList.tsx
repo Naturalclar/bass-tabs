@@ -1,3 +1,4 @@
+import { useId, type ChangeEvent } from 'react'
 import type { ScoreId, StoredScore } from '../editor/storage.ts'
 
 type Props = {
@@ -6,6 +7,10 @@ type Props = {
   onSelect: (id: ScoreId) => void
   onAdd: () => void
   onDelete: (id: ScoreId) => void
+  onExportAll: () => void
+  onImportFile: (file: File) => void
+  /** What the last import did, so a refused file is never silent. */
+  notice: string | null
 }
 
 /**
@@ -15,7 +20,25 @@ type Props = {
  * Deleting is the one action here undo cannot reach: the history describes
  * edits inside a score, not the library around it. Hence the confirmation.
  */
-export function ScoreList({ scores, currentId, onSelect, onAdd, onDelete }: Props) {
+export function ScoreList({
+  scores,
+  currentId,
+  onSelect,
+  onAdd,
+  onDelete,
+  onExportAll,
+  onImportFile,
+  notice,
+}: Props) {
+  const inputId = useId()
+
+  function handleFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (file) onImportFile(file)
+    // Reset so picking the same file again still fires a change event.
+    event.target.value = ''
+  }
+
   return (
     <aside className="sidebar" aria-label="保存した譜面">
       <div className="sidebar__head">
@@ -54,6 +77,27 @@ export function ScoreList({ scores, currentId, onSelect, onAdd, onDelete }: Prop
           )
         })}
       </ul>
+
+      <div className="sidebar__foot">
+        <button type="button" className="chip" onClick={onExportAll}>
+          全部書き出す
+        </button>
+        <label className="chip" htmlFor={inputId}>
+          取り込む
+          <input
+            id={inputId}
+            className="visually-hidden"
+            type="file"
+            accept=".json,.xml,.musicxml"
+            onChange={handleFile}
+          />
+        </label>
+      </div>
+      {notice && (
+        <p className="sidebar__notice" role="status">
+          {notice}
+        </p>
+      )}
     </aside>
   )
 }

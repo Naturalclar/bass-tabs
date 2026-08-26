@@ -73,7 +73,7 @@ function isEntry(value: unknown): value is Entry {
   )
 }
 
-function isScore(value: unknown): value is Score {
+export function isScore(value: unknown): value is Score {
   if (!isRecord(value)) return false
   if (typeof value.title !== 'string') return false
   if (typeof value.keyFifths !== 'number' || !Number.isInteger(value.keyFifths)) return false

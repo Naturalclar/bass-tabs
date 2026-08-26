@@ -1,5 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { BASE_PATH } from '../base-path.ts'
 import { pdfPageCount, pdfPageSizeMm } from './pdf.ts'
 
@@ -701,6 +703,137 @@ test.describe('記譜のオクターブ', () => {
     expect(xml.replace(/\s+/g, ' ')).toContain(
       '<transpose> <chromatic>0</chromatic> <octave-change>-1</octave-change> </transpose>',
     )
+  })
+})
+
+/**
+ * The scores live only in `localStorage`, so clearing site data or moving
+ * machines loses everything. These checks are about the way back.
+ */
+test.describe('書き出しと取り込み', () => {
+  /**
+   * Files handed to `setInputFiles` must live under an ASCII path.
+   * `testInfo.outputPath()` builds its directory from the test title, and with
+   * a Japanese title that path is non-ASCII -- Playwright then attaches
+   * nothing, raises nothing, and the change event never fires. That looks
+   * exactly like a broken import handler, which cost an hour to tell apart.
+   */
+  const fixtures = mkdtempSync(join(tmpdir(), 'bass-tabs-'))
+  const fixture = (name: string, contents: string) => {
+    const path = join(fixtures, name)
+    writeFileSync(path, contents)
+    return path
+  }
+
+  async function twoScores(page: Page) {
+    await openEditor(page)
+    await page.getByLabel('曲名').fill('一曲目')
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('7')
+
+    await page.getByRole('button', { name: '＋ 追加' }).click()
+    await expect(page.locator('.score-row').last()).toHaveClass(/score-row--current/)
+    await page.getByLabel('曲名').fill('二曲目')
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('3')
+    await expect(page.locator('.tab-cell--note')).toHaveText(['3'])
+  }
+
+  async function saveDownload(page: Page, button: string, name: string) {
+    const event = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: button }).click(),
+    ]).then(([download]) => download)
+    const path = join(fixtures, name)
+    await event.saveAs(path)
+    return path
+  }
+
+  test('書き出して消して取り込むと全部戻る', async ({ page }) => {
+    await twoScores(page)
+    const saved = await saveDownload(page, '全部書き出す', 'library.json')
+
+    // The whole point: survive losing the browser's storage.
+    await page.evaluate(() => localStorage.clear())
+    await page.reload()
+    await page.getByRole('button', { name: '譜面を作る' }).click()
+    await expect(page.locator('.score-row')).toHaveCount(1)
+
+    await page.setInputFiles('.sidebar input[type="file"]', saved)
+
+    await expect(page.locator('.sidebar__notice')).toContainText('2 曲を取り込みました')
+    const titles = (await page.locator('.score-row__open').allTextContents()).join(' ')
+    expect(titles).toContain('一曲目')
+    expect(titles).toContain('二曲目')
+  })
+
+  test('取り込みは既にある譜面を消さない', async ({ page }) => {
+    await twoScores(page)
+    const saved = await saveDownload(page, '全部書き出す', 'again.json')
+
+    await page.setInputFiles('.sidebar input[type="file"]', saved)
+
+    // Restoring on top of a library adds to it; nothing already saved is lost.
+    await expect(page.locator('.score-row')).toHaveCount(4)
+  })
+
+  test('書き出した MusicXML を一覧に取り込める', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('5')
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('7')
+    await expect(page.locator('.tab-cell--note')).toHaveText(['5', '7'])
+
+    const saved = await saveDownload(page, 'MusicXML を書き出す', 'one.musicxml')
+    await page.setInputFiles('.sidebar input[type="file"]', saved)
+
+    await expect(page.locator('.sidebar__notice')).toContainText('1 曲を取り込みました')
+    await expect(page.locator('.score-row')).toHaveCount(2)
+    // Read back from the frets, so the written octave cannot confuse it.
+    await expect(page.locator('.tab-cell--note')).toHaveText(['5', '7'])
+  })
+
+  const REFUSED: { label: string; name: string; contents: string; notice: string }[] = [
+    {
+      label: '壊れた JSON',
+      name: 'broken.json',
+      contents: 'not json at all',
+      notice: 'ファイルを読めませんでした',
+    },
+    {
+      label: '別形式の JSON',
+      name: 'wrong.json',
+      contents: '{"format":"something-else","version":1,"scores":[]}',
+      notice: 'bass-tabs の書き出しではありません',
+    },
+    {
+      label: '知らない版の JSON',
+      name: 'future.json',
+      contents: '{"format":"bass-tabs-library","version":99,"scores":[]}',
+      notice: '対応していない版',
+    },
+  ]
+
+  for (const { label, name, contents, notice } of REFUSED) {
+    test(`${label}は取り込まず、理由を出す`, async ({ page }) => {
+      await openEditor(page)
+
+      await page.setInputFiles('.sidebar input[type="file"]', fixture(name, contents))
+
+      await expect(page.locator('.sidebar__notice')).toContainText(notice)
+      // A refused file changes nothing.
+      await expect(page.locator('.score-row')).toHaveCount(1)
+    })
+  }
+
+  test('TAB の無い MusicXML は取り込まず、理由を出す', async ({ page }) => {
+    await openEditor(page)
+
+    await page.setInputFiles('.sidebar input[type="file"]', 'public/samples/bass-standard.musicxml')
+
+    await expect(page.locator('.sidebar__notice')).toContainText('TAB 譜が入っていない')
+    await expect(page.locator('.score-row')).toHaveCount(1)
   })
 })
 

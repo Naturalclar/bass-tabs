@@ -425,6 +425,22 @@ body {
   color: var(--ui-fg);
 }
 
+.sidebar__foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--ui-divider);
+}
+
+.sidebar__notice {
+  margin: 0.4rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--ui-muted);
+}
+
 @media (max-width: 720px) {
   .workspace {
     display: block;
