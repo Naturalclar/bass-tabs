@@ -120,9 +120,15 @@ The staff is found by geometry -- four long, thin, *evenly spaced* lines, tried 
 polarities -- not by whole-image statistics; a global minority-ink guess broke on the first
 real screenshot (dark browser UI around a bright video).
 
-`src/components/VideoImport.tsx` is video mode: a YouTube embed plus `getDisplayMedia`
-capture feeding the same recogniser (`readTabEntries`), appending to the open score via
-`useEditor().appendEntries` -- one capture, one commit, one undo step. The rendered score is
+`src/components/VideoImport.tsx` is video mode, with two sources. A video *file* is
+same-origin, so the scan seeks through it at decode speed and reads each new screenful of tab
+once -- `videoScan.ts` holds the pure screen-signature logic (position+strings per beat,
+70%-overlap sameness, so a moving playhead does not read as a new screen). A YouTube embed is
+cross-origin, so it goes through `getDisplayMedia` capture instead. Both feed the same
+recogniser (`readTabEntries`) and append to the open score -- one capture (or one detected
+screen), one commit, one undo step. The scan loop outlives many commits, so it reads
+`appendEntries` through a ref; the captured prop would append every screen onto the score as
+it was when the scan started, and the last screen would silently win. The rendered score is
 `hidden` (not unmounted -- OSMD owns the container) while this mode is up, because the capture
 films this very tab and staff lines on screen read as false string lines. The OCR worker is a
 module-level singleton so repeated captures do not re-download megabytes. Tests stub

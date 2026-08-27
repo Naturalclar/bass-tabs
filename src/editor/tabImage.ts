@@ -43,6 +43,9 @@ export type TabImageAnalysis =
       labels: Int32Array
       /** Beats left to right; a column with several parts is a chord. */
       columns: TabColumnRegion[]
+      /** Horizontal extent of the staff, for scale-free comparisons. */
+      tabX0: number
+      tabX1: number
     }
   | { ok: false; reason: 'no-lanes' | 'no-notes' }
 
@@ -414,5 +417,5 @@ export function analyzeTabImage(image: ImageData): TabImageAnalysis {
     })
   }
 
-  return { ok: true, width, height, mask, ink, inkOriginal, labels, columns }
+  return { ok: true, width, height, mask, ink, inkOriginal, labels, columns, tabX0, tabX1 }
 }
