@@ -10,6 +10,7 @@ import { useEditor } from './editor/useEditor.ts'
 import { useEditorKeyboard } from './editor/useEditorKeyboard.ts'
 import { toBackup } from './editor/backup.ts'
 import { importFile, isTabImage } from './editor/importFile.ts'
+import { toMidiFile } from './editor/midiFile.ts'
 import { useMidiInput } from './editor/useMidiInput.ts'
 import { usePlayback } from './editor/usePlayback.ts'
 import { ticksAt } from './editor/playback.ts'
@@ -94,14 +95,21 @@ export default function App() {
     [editor],
   )
 
-  const download = useCallback((text: string, name: string, type: string) => {
-    const url = URL.createObjectURL(new Blob([text], { type }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = name
-    link.click()
-    URL.revokeObjectURL(url)
-  }, [])
+  // Takes bytes as well as text: a MIDI file is binary, and a string-only
+  // helper would have written its digits out as characters. The type argument
+  // is spelled out because a bare `Uint8Array` also admits a SharedArrayBuffer,
+  // which `Blob` will not take.
+  const download = useCallback(
+    (data: string | Uint8Array<ArrayBuffer>, name: string, type: string) => {
+      const url = URL.createObjectURL(new Blob([data], { type }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = name
+      link.click()
+      URL.revokeObjectURL(url)
+    },
+    [],
+  )
 
   const handleExportAll = useCallback(() => {
     download(toBackup(editor.scores), 'bass-tabs-library.json', 'application/json')
@@ -114,6 +122,10 @@ export default function App() {
       'application/vnd.recordare.musicxml+xml',
     )
   }, [download, editor.musicXml, editor.score.title])
+
+  const handleExportMidi = useCallback(() => {
+    download(toMidiFile(editor.score), `${editor.score.title || 'score'}.mid`, 'audio/midi')
+  }, [download, editor.score])
 
   return (
     <>
@@ -178,6 +190,7 @@ export default function App() {
                 canRedo={editor.canRedo}
                 onConnectMidi={() => void midi.connect()}
                 onExport={handleExport}
+                onExportMidi={handleExportMidi}
               />
               <TabEditor
                 measures={editor.score.measures}

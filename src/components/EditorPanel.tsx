@@ -46,6 +46,7 @@ type Props = {
   canRedo: boolean
   onConnectMidi: () => void
   onExport: () => void
+  onExportMidi: () => void
 }
 
 const TIMES: TimeSignature[] = [
@@ -336,6 +337,11 @@ export function EditorPanel(props: Props) {
         </button>
         <button type="button" className="button" onClick={props.onExport}>
           MusicXML を書き出す
+        </button>
+        {/* MIDI carries the notes but not the tab: strings and frets have no
+            representation in the format. One-way door, said so in README. */}
+        <button type="button" className="button" onClick={props.onExportMidi}>
+          MIDI を書き出す
         </button>
       </div>
 
