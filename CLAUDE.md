@@ -34,7 +34,7 @@ passing is not the same as CI passing — the build and the print checks are not
 The only tests are the Playwright specs in `tests/` — `print.spec.ts` for imported files, and
 one spec per editor area for scores written in the app (`editor-input`, `library`,
 `import-export`, `image-import`, `video-import`, `playback`, `appearance`, sharing
-`tests/helpers.ts`); there are no unit tests. `pnpm test:print` runs them all — it builds and
+`tests/helpers.ts`), plus `bundle.spec.ts` for what the first load is allowed to carry; there are no unit tests. `pnpm test:print` runs them all — it builds and
 serves the app itself, so it needs no running dev server.
 
 ## Two non-negotiable technical choices
@@ -116,6 +116,14 @@ When the open score changes — a switch, an add, an import, a delete of the ope
 in `useEditor` that remembers a position in it (cursor, history, commit key) resets in one place,
 keyed on `currentId`. Library operations deliberately carry no resets of their own; a new one
 cannot forget to.
+
+The OCR engine is loaded on demand from inside `imageImport.ts`, and that is the only thing
+about the bundle worth defending: `tests/bundle.spec.ts` fetches the scripts the page pulls in
+and fails if tesseract.js is among them, because hoisting that `await import` to a static one
+breaks no feature and no build — it just makes every visitor download the engine. The
+recogniser's *own* modules are imported statically on purpose (#79): both the image path and
+video mode need them, and splitting them out moves 7 KB out of a 1.5 MB chunk that is almost
+all OSMD.
 
 `src/editor/tabImage.ts` + `imageImport.ts` read a screenshot of a tab into a `Score`:
 pixel analysis (line detection, glyph clustering — pure, testable) in the former, OCR
