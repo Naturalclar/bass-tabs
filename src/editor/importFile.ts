@@ -1,4 +1,5 @@
 import { fromBackup } from './backup.ts'
+import { fromTabImage } from './imageImport.ts'
 import { fromMusicXml } from './musicxmlImport.ts'
 import { MAX_MEASURES } from './model.ts'
 import type { Score } from './model.ts'
@@ -36,10 +37,17 @@ export async function importFile(file: File): Promise<ImportOutcome> {
 
 async function read(file: File): Promise<ImportOutcome> {
   if (isTabImage(file.name)) {
-    // Dynamically imported, so the image reader -- and the OCR orchestration
-    // only it needs -- stays out of the main bundle until a screenshot is
-    // actually imported.
-    const { fromTabImage } = await import('./imageImport.ts')
+    // Imported statically, on purpose. This was a dynamic import for a while,
+    // meant to keep the recogniser out of the first load -- but video mode
+    // needs the same module and is reachable from the toolbar, so it landed
+    // in the main chunk anyway and rolldown said so on every build. Measured,
+    // splitting both entry points apart moves 7 KB (3.5 KB gzipped) out of a
+    // 1,550 KB chunk that is almost entirely OSMD: not worth two indirections
+    // and a comment in each explaining why they must stay dynamic.
+    //
+    // The megabytes *are* still deferred: tesseract.js and its wasm are
+    // loaded on demand inside `imageImport.ts` itself, and nothing here
+    // pulls them in.
     const result = await fromTabImage(file, file.name.replace(/\.[^.]+$/, ''))
     if (!result.ok) {
       return {
