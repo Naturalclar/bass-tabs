@@ -151,6 +151,7 @@ export default function App() {
                 measureCount={editor.score.measures.length}
                 value={editor.value}
                 dotted={editor.dotted}
+                triplet={editor.triplet}
                 fret={editor.fret}
                 remaining={editor.remaining}
                 midi={midi.status}
@@ -165,6 +166,7 @@ export default function App() {
                 onMeasureCount={editor.setMeasureCount}
                 onValue={editor.setValue}
                 onDotted={editor.setDotted}
+                onTriplet={editor.setTriplet}
                 onFret={editor.setFret}
                 onRest={editor.putRest}
                 onDelete={editor.removeAtCursor}

@@ -70,15 +70,33 @@ function fingeringOf(note: Element): Fingering | null {
   return { string, fret }
 }
 
-function entryOf(note: Element): Entry | null {
+/**
+ * Whether a note is a triplet -- three in the time of two. Anything else
+ * under `<time-modification>` (a quintuplet, a duplet) has no representation
+ * here, and is refused rather than read as its plain value: this file used to
+ * ignore the element entirely, which silently turned triplet eighths into
+ * straight eighths whenever the bar happened to have room for them.
+ */
+function tripletOf(note: Element): boolean | 'unsupported' {
+  const modification = note.querySelector('time-modification')
+  if (!modification) return false
+  const actual = Number(text(modification, 'actual-notes'))
+  const normal = Number(text(modification, 'normal-notes'))
+  if (actual === 3 && normal === 2) return true
+  return 'unsupported'
+}
+
+function entryOf(note: Element): Entry | 'unsupported' | null {
   const value = VALUE_BY_TYPE[text(note, 'type') ?? '']
   if (!value || !(NOTE_VALUES as readonly number[]).includes(value)) return null
   const dotted = note.querySelector('dot') !== null
+  const triplet = tripletOf(note)
+  if (triplet === 'unsupported') return 'unsupported'
 
-  if (note.querySelector('rest')) return { kind: 'rest', value, dotted }
+  if (note.querySelector('rest')) return { kind: 'rest', value, dotted, triplet }
 
   const fingering = fingeringOf(note)
-  return fingering === null ? null : { kind: 'note', notes: [fingering], value, dotted }
+  return fingering === null ? null : { kind: 'note', notes: [fingering], value, dotted, triplet }
 }
 
 export function fromMusicXml(xml: string): MusicXmlImport {
@@ -119,6 +137,7 @@ export function fromMusicXml(xml: string): MusicXmlImport {
       if (note.querySelector('chord')) {
         const previous = entries[entries.length - 1]
         const fingering = fingeringOf(note)
+        if (tripletOf(note) === 'unsupported') return { ok: false, reason: 'unsupported' }
         if (!previous || previous.kind !== 'note' || fingering === null) {
           return { ok: false, reason: 'unsupported' }
         }
@@ -129,6 +148,7 @@ export function fromMusicXml(xml: string): MusicXmlImport {
         continue
       }
       const entry = entryOf(note)
+      if (entry === 'unsupported') return { ok: false, reason: 'unsupported' }
       if (entry) entries.push(entry)
     }
     measures.push(entries)

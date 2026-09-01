@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { importFile, isTabImage } from '../src/editor/importFile.ts'
 import { toBackup } from '../src/editor/backup.ts'
@@ -144,6 +144,11 @@ test.describe('書き出しと取り込み', () => {
   }
   const quarterOn = (string: number, fret: number, extra = '') =>
     `<note>${extra}<pitch><step>E</step><octave>2</octave></pitch><duration>24</duration><type>quarter</type><staff>1</staff><notations><technical><string>${string}</string><fret>${fret}</fret></technical></notations></note>`
+  /** An eighth note under a <time-modification>: `actual` in the time of 2. */
+  const tupletEighth = (fret: number, actual: number) =>
+    `<note><pitch><step>E</step><octave>2</octave></pitch><duration>${Math.round((12 * 2) / actual)}</duration><type>eighth</type>` +
+    `<time-modification><actual-notes>${actual}</actual-notes><normal-notes>2</normal-notes></time-modification>` +
+    `<staff>1</staff><notations><technical><string>4</string><fret>${fret}</fret></technical></notations></note>`
 
   test('65 小節の MusicXML は取り込まず、理由を出す', async ({ page }) => {
     await openEditor(page)
@@ -215,6 +220,101 @@ test.describe('書き出しと取り込み', () => {
     await page.setInputFiles(
       '.sidebar input[type="file"]',
       fixture('tie.musicxml', tabXml(1, tied)),
+    )
+    await expect(page.locator('.sidebar__notice')).toContainText('タイ・装飾音')
+    await expect(page.locator('.score-row')).toHaveCount(1)
+  })
+
+  /**
+   * 3 連は #77 まで素通しだった: <time-modification> を見ていないので
+   * 「3 連 8 分」が「普通の 8 分」として読まれ、小節に空きさえあれば
+   * 黙って違うリズムで取り込まれていた -- このファイル自身が防ぐと
+   * 言っている「元と違う譜面」そのもの。
+   */
+  test('3 連入りの MusicXML を 3 連のまま取り込める', async ({ page }) => {
+    await openEditor(page)
+
+    const group = [0, 3, 5].map((fret) => tupletEighth(fret, 3)).join('')
+    await page.setInputFiles(
+      '.sidebar input[type="file"]',
+      fixture('triplet.musicxml', tabXml(1, group)),
+    )
+    await expect(page.locator('.sidebar__notice')).toContainText('1 曲を取り込みました')
+    await expect(page.locator('.tab-cell--note')).toHaveText(['0', '3', '5'])
+    await expect(page.locator('.tab-column__value').first()).toHaveText('♪³')
+    // 3 連として読めていれば 3 つで 1 拍ぶん。ストレートなら 1.5 拍消える。
+    await expect(page.locator('.editor-remaining')).toContainText('残り: 3 拍')
+  })
+
+  test('半端な 3 連は書き出しのときに 3 連休符で閉じられる', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('e')
+    await page.keyboard.press('t')
+    // 1 つだけ: グループは 3 つそろっていない -- 打ちながらなら必ず通る状態
+    await page.keyboard.press('3')
+
+    const download = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: 'MusicXML を書き出す' }).click(),
+    ]).then(([event]) => event)
+    const saved = join(fixtures, 'partial.musicxml')
+    await download.saveAs(saved)
+    const xml = readFileSync(saved, 'utf8')
+
+    // 開いたブラケットは閉じていなければならない。閉じ手は 3 連休符で、
+    // モデルではなく padded() が足す -- 足りない小節を休符で埋めるのと
+    // 同じ流儀。閉じずに書き出すと OSMD は開いたままのブラケットを渡され、
+    // 取り込み側でも小節の長さが合わなくなる。
+    expect((xml.match(/<tuplet type="start"/g) ?? []).length).toBe(2)
+    expect((xml.match(/<tuplet type="stop"/g) ?? []).length).toBe(2)
+    // 3 連が 3 つぶん (音 1 + 休符 2) 書かれている: 譜表 2 つで 6
+    expect((xml.match(/<actual-notes>3<\/actual-notes>/g) ?? []).length).toBe(6)
+
+    // 閉じたファイルは読み戻せる
+    await page.setInputFiles('.sidebar input[type="file"]', saved)
+    await expect(page.locator('.sidebar__notice')).toContainText('1 曲を取り込みました')
+  })
+
+  test('3 連は書き出して取り込んでも 3 連のまま', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('e')
+    await page.keyboard.press('t')
+    for (const key of ['3', '5', '7']) await page.keyboard.press(key)
+
+    const download = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: 'MusicXML を書き出す' }).click(),
+    ]).then(([event]) => event)
+    const saved = join(fixtures, 'roundtrip.musicxml')
+    await download.saveAs(saved)
+
+    const xml = readFileSync(saved, 'utf8')
+    // ブラケットはモデルではなく書き出しが導く: グループの端だけに付く
+    expect(xml).toContain('<actual-notes>3</actual-notes>')
+    expect((xml.match(/<tuplet type="start"/g) ?? []).length).toBe(2) // 五線 + TAB
+    expect((xml.match(/<tuplet type="stop"/g) ?? []).length).toBe(2)
+
+    await page.setInputFiles('.sidebar input[type="file"]', saved)
+    await expect(page.locator('.sidebar__notice')).toContainText('1 曲を取り込みました')
+    await expect(page.locator('.tab-cell--note')).toHaveText(['3', '5', '7'])
+    // 3 連として読めた証拠はここ: 書き出したファイルは padded() が休符で
+    // 閉じた満杯の小節なので残りは 0 拍。ストレートの 8 分として読まれて
+    // いれば 3 音で 1.5 拍を食い、残りの休符と合わせて 4.5 拍ぶんになって
+    // 小節からあふれ、overfull で取り込み自体が断られる。
+    await expect(page.locator('.editor-remaining')).toContainText('残り: 0 拍')
+    await expect(page.locator('.tab-column__value').first()).toHaveText('♪³')
+  })
+
+  test('3 連以外の連符は取り込まず、理由を出す', async ({ page }) => {
+    await openEditor(page)
+
+    // 5 連: モデルに表現が無い。素通しさせると別のリズムになる。
+    const quintuplet = [0, 3, 5, 7, 9].map((fret) => tupletEighth(fret, 5)).join('')
+    await page.setInputFiles(
+      '.sidebar input[type="file"]',
+      fixture('quintuplet.musicxml', tabXml(1, quintuplet)),
     )
     await expect(page.locator('.sidebar__notice')).toContainText('タイ・装飾音')
     await expect(page.locator('.score-row')).toHaveCount(1)

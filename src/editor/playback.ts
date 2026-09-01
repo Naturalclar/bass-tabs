@@ -48,7 +48,7 @@ export function columnAt(
   if (!entries) return null
   let at = measure * capacity
   for (let index = 0; index < entries.length; index++) {
-    const duration = ticks(entries[index].value, entries[index].dotted)
+    const duration = ticks(entries[index])
     if (tick < at + duration) return { measure, index }
     at += duration
   }
@@ -61,7 +61,7 @@ export function ticksAt(score: Score, at: { measure: number; index: number }): n
   let tick = at.measure * capacity
   const entries = score.measures[at.measure] ?? []
   for (let index = 0; index < Math.min(at.index, entries.length); index++) {
-    tick += ticks(entries[index].value, entries[index].dotted)
+    tick += ticks(entries[index])
   }
   return tick
 }
@@ -72,7 +72,7 @@ export function schedule(score: Score): PlaybackNote[] {
   score.measures.forEach((entries, measure) => {
     let at = measure * capacity
     for (const entry of entries) {
-      const duration = ticks(entry.value, entry.dotted)
+      const duration = ticks(entry)
       if (entry.kind === 'note') {
         // A chord is its fingerings sounding together: one PlaybackNote per
         // string, all sharing the beat's start and length.

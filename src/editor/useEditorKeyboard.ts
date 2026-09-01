@@ -141,6 +141,11 @@ export function useEditorKeyboard(editor: Editor) {
         case '.':
           editor.setDotted(!editor.dotted)
           break
+        // Not a digit: those are frets, so a triplet cannot be "3".
+        case 't':
+        case 'T':
+          editor.setTriplet(!editor.triplet)
+          break
         case 'r':
         case 'R':
           editor.putRest()

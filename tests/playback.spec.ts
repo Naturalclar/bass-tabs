@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { columnAt, schedule, secondsPerTick, ticksAt } from '../src/editor/playback.ts'
 import {
   DIVISIONS,
+  ticks,
   type Entry,
   type NoteValue,
   type Score,
@@ -124,8 +125,9 @@ test.describe('再生のスケジュール', () => {
     notes: [{ string: 4, fret }],
     value,
     dotted,
+    triplet: false,
   })
-  const rest = (value: NoteValue = 4): Entry => ({ kind: 'rest', value, dotted: false })
+  const rest = (value: NoteValue = 4): Entry => ({ kind: 'rest', value, dotted: false, triplet: false })
   const scoreOf = (
     measures: Entry[][],
     time: TimeSignature = { beats: 4, beatType: 4 },
@@ -147,6 +149,29 @@ test.describe('再生のスケジュール', () => {
     expect(columnAt(score, quarter / 2)).toEqual({ measure: 0, index: 0 })
   })
 
+  test('3 連は 2/3 の長さで、3 つで元の音価 1 つになる', () => {
+    const straight = { value: 8, dotted: false, triplet: false } as const
+    const trip = { value: 8, dotted: false, triplet: true } as const
+    expect(ticks(straight)).toBe(12)
+    expect(ticks(trip)).toBe(8)
+    // 整数のまま: DIVISIONS = 24 は 3 連も割り切る (#77)
+    expect(Number.isInteger(ticks({ value: 16, dotted: false, triplet: true }))).toBe(true)
+    expect(ticks(trip) * 3).toBe(ticks({ value: 4, dotted: false, triplet: false }))
+  })
+
+  test('3 連は 2/3 の間隔で鳴り、続く音がその後ろに来る', () => {
+    const trip = (fret: number): Entry => ({
+      kind: 'note',
+      notes: [{ string: 4, fret }],
+      value: 8,
+      dotted: false,
+      triplet: true,
+    })
+    const notes = schedule(scoreOf([[trip(0), trip(0), trip(0), note(0)]]))
+    expect(notes.map((n) => n.startTicks)).toEqual([0, 8, 16, 24])
+    expect(notes.map((n) => n.durationTicks)).toEqual([8, 8, 8, 24])
+  })
+
   test('和音は同じ時刻に全部鳴る', () => {
     const chord: Entry = {
       kind: 'note',
@@ -156,6 +181,7 @@ test.describe('再生のスケジュール', () => {
       ],
       value: 4,
       dotted: false,
+      triplet: false,
     }
     const notes = schedule(scoreOf([[chord, note(3)]]))
     expect(notes).toEqual([
@@ -184,6 +210,7 @@ test.describe('再生のスケジュール', () => {
       ],
       value: 4,
       dotted: false,
+      triplet: false,
     }
     const notes = schedule(scoreOf([[chord]]))
     expect(notes).toEqual([

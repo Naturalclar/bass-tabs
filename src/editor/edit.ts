@@ -132,7 +132,9 @@ export function toggleString(
     ? entry.notes.filter((note) => note.string !== targetString)
     : sortedFingerings([...entry.notes, { string: targetString, fret }])
   const next: Entry =
-    notes.length > 0 ? { ...entry, notes } : { kind: 'rest', value: entry.value, dotted: entry.dotted }
+    notes.length > 0
+      ? { ...entry, notes }
+      : { kind: 'rest', value: entry.value, dotted: entry.dotted, triplet: entry.triplet }
   return { score: withEntry(score, at, () => next), cursor: at, added: !existing }
 }
 
@@ -236,7 +238,7 @@ export function withTime(score: Score, time: TimeSignature): Score {
     measures: score.measures.map((entries) => {
       const kept: Entry[] = []
       for (const entry of entries) {
-        if (!fits(kept, time, entry.value, entry.dotted)) break
+        if (!fits(kept, time, entry)) break
         kept.push(entry)
       }
       return kept

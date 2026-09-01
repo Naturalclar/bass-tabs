@@ -44,33 +44,112 @@ function escapeXml(text: string): string {
  * being forced on the person typing.
  */
 function padded(entries: Entry[], capacity: number): Entry[] {
-  let remaining = capacity - entries.reduce((sum, e) => sum + ticks(e.value, e.dotted), 0)
   const padding: Entry[] = []
+
+  // A triplet is three notes in one bracket, but they are entered one at a
+  // time, so a bar in progress is nearly always sitting on a group of one or
+  // two. Closing it with triplet rests is the same bargain padded() already
+  // strikes for a short bar: the model holds what was entered, and the
+  // serialiser makes it well-formed notation.
+  let run = 0
+  let runValue: NoteValue | null = null
+  for (const entry of entries) {
+    if (entry.triplet && (runValue === null || entry.value === runValue)) {
+      runValue = entry.value
+      run = (run + 1) % 3
+    } else if (entry.triplet) {
+      runValue = entry.value
+      run = 1
+    } else {
+      run = 0
+      runValue = null
+    }
+  }
+  if (run > 0 && runValue !== null) {
+    for (let i = run; i < 3; i++) {
+      padding.push({ kind: 'rest', value: runValue, dotted: false, triplet: true })
+    }
+  }
+
+  let remaining =
+    capacity -
+    entries.reduce((sum, e) => sum + ticks(e), 0) -
+    padding.reduce((sum, e) => sum + ticks(e), 0)
   // Largest value first, so the rest of a half-empty 4/4 bar is one half rest
   // rather than eight sixteenths.
   for (const value of [1, 2, 4, 8, 16] as NoteValue[]) {
     for (const dotted of [true, false]) {
-      while (remaining >= ticks(value, dotted)) {
-        padding.push({ kind: 'rest', value, dotted })
-        remaining -= ticks(value, dotted)
+      const rest: Entry = { kind: 'rest', value, dotted, triplet: false }
+      while (remaining >= ticks(rest)) {
+        padding.push(rest)
+        remaining -= ticks(rest)
       }
     }
   }
   return [...entries, ...padding]
 }
 
-function noteXml(entry: Entry, staff: 1 | 2, keyFifths: number): string {
-  const duration = ticks(entry.value, entry.dotted)
+/**
+ * Where each entry sits in its tuplet: 0, 1, 2 for a triplet's three, null
+ * for anything outside one. The brackets are derived here rather than stored,
+ * so the model can stay a flat list -- see `Duration` in model.ts.
+ */
+function tupletPositions(entries: Entry[]): (number | null)[] {
+  let run = 0
+  let runValue: NoteValue | null = null
+  return entries.map((entry) => {
+    if (!entry.triplet) {
+      run = 0
+      runValue = null
+      return null
+    }
+    if (runValue !== entry.value) {
+      runValue = entry.value
+      run = 0
+    }
+    const position = run
+    run = (run + 1) % 3
+    return position
+  })
+}
+
+function noteXml(
+  entry: Entry,
+  staff: 1 | 2,
+  keyFifths: number,
+  /** 0, 1 or 2 within a triplet; null outside one. */
+  tuplet: number | null,
+): string {
+  const duration = ticks(entry)
+  // Three in the time of two, and the bracket drawn on the first and last of
+  // the group. OSMD renders both the number and the bracket, on the notation
+  // staff and the tab staff alike (verified on a two-page sample).
+  const modification = entry.triplet
+    ? '        <time-modification><actual-notes>3</actual-notes>' +
+      '<normal-notes>2</normal-notes></time-modification>\n'
+    : ''
+  const bracket =
+    tuplet === 0
+      ? '<tuplet type="start" bracket="yes" show-number="actual"/>'
+      : tuplet === 2
+        ? '<tuplet type="stop"/>'
+        : ''
   const tail = (technical: string) =>
     `        <duration>${duration}</duration>\n` +
     '        <voice>1</voice>\n' +
     `        <type>${TYPE_NAMES[entry.value]}</type>\n` +
     (entry.dotted ? '        <dot/>\n' : '') +
+    modification +
     `        <staff>${staff}</staff>\n` +
     technical +
     '      </note>\n'
 
-  if (entry.kind === 'rest') return '      <note>\n        <rest/>\n' + tail('')
+  if (entry.kind === 'rest') {
+    return (
+      '      <note>\n        <rest/>\n' +
+      tail(bracket === '' ? '' : `        <notations>${bracket}</notations>\n`)
+    )
+  }
 
   // A chord is the same <note> element once per string, every one after the
   // first opening with <chord/> so it shares the first one's moment instead
@@ -82,11 +161,14 @@ function noteXml(entry: Entry, staff: 1 | 2, keyFifths: number): string {
         midiFor(fingering.string, fingering.fret) + WRITTEN_OCTAVE_SHIFT,
         keyFifths,
       )
-      const technical =
-        staff === 2
-          ? `        <notations><technical><string>${fingering.string}</string>` +
-            `<fret>${fingering.fret}</fret></technical></notations>\n`
-          : ''
+      // The bracket belongs to the beat, so only the first chord tone carries
+      // it -- a <tuplet> on every string would open the group three times.
+      const marks =
+        (index === 0 ? bracket : '') +
+        (staff === 2
+          ? `<technical><string>${fingering.string}</string><fret>${fingering.fret}</fret></technical>`
+          : '')
+      const technical = marks === '' ? '' : `        <notations>${marks}</notations>\n`
       return (
         '      <note>\n' +
         (index > 0 ? '        <chord/>\n' : '') +
@@ -158,8 +240,9 @@ export function toMusicXml(score: Score): string {
   const measures = score.measures
     .map((entries, index) => {
       const full = padded(entries, capacity)
-      const notation = full.map((e) => noteXml(e, 1, score.keyFifths)).join('')
-      const tab = full.map((e) => noteXml(e, 2, score.keyFifths)).join('')
+      const tuplets = tupletPositions(full)
+      const notation = full.map((e, i) => noteXml(e, 1, score.keyFifths, tuplets[i])).join('')
+      const tab = full.map((e, i) => noteXml(e, 2, score.keyFifths, tuplets[i])).join('')
       return (
         `    <measure number="${index + 1}">\n` +
         (index === 0 ? attributesXml(score) + tempoXml(score.tempo) : '') +

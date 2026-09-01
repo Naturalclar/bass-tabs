@@ -23,7 +23,9 @@ function appendableColumns(entries: Entry[], time: TimeSignature): (Entry | null
 }
 
 function entryLabel(entry: Entry): string {
-  return `${VALUE_LABELS[entry.value] ?? entry.value}${entry.dotted ? '.' : ''}`
+  const value = VALUE_LABELS[entry.value] ?? entry.value
+  // Superscript 3 for a triplet, the way tuplets are marked on paper.
+  return `${value}${entry.dotted ? '.' : ''}${entry.triplet ? '\u00b3' : ''}`
 }
 
 /**
