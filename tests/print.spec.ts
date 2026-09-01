@@ -19,6 +19,9 @@ const SAMPLES = [
   { file: 'bass-standard.musicxml', pages: 2 },
   { file: 'bass-standard.mxl', pages: 2 },
   { file: 'bass-tab.musicxml', pages: 2 },
+  // Same score with measure 2 rewritten as four eighth-note triplets: the
+  // tuplet brackets must not repaginate the document (#77).
+  { file: 'bass-tab-triplets.musicxml', pages: 2 },
 ]
 
 
@@ -53,6 +56,18 @@ for (const sample of SAMPLES) {
     expect(size.height).toBeCloseTo(297, 0)
   })
 }
+
+test('三連符のブラケットと 3 が両方の譜表に出る', async ({ page }) => {
+  await openSample(page, 'bass-tab-triplets.musicxml')
+
+  // OSMD draws the tuplet number on the notation staff *and* the tab staff
+  // (measured before building this: four groups, so eight marks). Reading the
+  // rendered text rather than the file is the point -- the file always said 3.
+  const threes = await page
+    .locator('svg.score-page text')
+    .evaluateAll((nodes) => nodes.filter((node) => node.textContent?.trim() === '3').length)
+  expect(threes).toBeGreaterThanOrEqual(8)
+})
 
 test('page breaks are assigned by index, not by :last-of-type', async ({ page }) => {
   await openSample(page, 'bass-standard.musicxml')

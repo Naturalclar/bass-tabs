@@ -45,7 +45,7 @@ const SCORE_KEY_PREFIX = 'bass-tabs:score:'
  * changes in a way the validator below would still accept -- a renamed field
  * with a compatible type, a changed unit, a changed meaning.
  */
-const STORAGE_VERSION = 4
+const STORAGE_VERSION = 5
 
 const BEAT_TYPES = [1, 2, 4, 8, 16]
 
@@ -80,6 +80,10 @@ function isFingering(value: unknown): value is { string: number; fret: number } 
 function isEntry(value: unknown): value is Entry {
   if (!isRecord(value)) return false
   if (typeof value.dotted !== 'boolean') return false
+  if (typeof value.triplet !== 'boolean') return false
+  // Exclusive by construction: `ticks` would otherwise silently ignore the
+  // dot, and a stored score is the one input nothing type-checks.
+  if (value.dotted && value.triplet) return false
   if (typeof value.value !== 'number') return false
   if (!(NOTE_VALUES as readonly number[]).includes(value.value)) return false
   if (value.kind === 'rest') return true
@@ -174,13 +178,36 @@ function fromVersion3(value: unknown): unknown {
   return { ...value, tempo: emptyScore().tempo }
 }
 
+/** Version 4 had no tuplets: every entry it stored was a straight one. */
+function fromVersion4(value: unknown): unknown {
+  if (!isRecord(value) || !Array.isArray(value.measures)) return value
+  return {
+    ...value,
+    measures: value.measures.map((measure) =>
+      Array.isArray(measure)
+        ? measure.map((entry) => (isRecord(entry) ? { ...entry, triplet: false } : entry))
+        : measure,
+    ),
+  }
+}
+
 function readScore(id: ScoreId): Score | null {
   const parsed = read(SCORE_KEY_PREFIX + id)
   if (!isRecord(parsed)) return null
+  // One lift per version step, applied in order from whatever version the
+  // score was written at: an old score walks the chain instead of needing a
+  // rule for every pair of versions.
+  const LIFTS: Record<number, (value: unknown) => unknown> = {
+    2: fromVersion2,
+    3: fromVersion3,
+    4: fromVersion4,
+  }
+  const from = parsed.version
+  if (typeof from !== 'number' || from < 2 || from > STORAGE_VERSION) return null
   let lifted = parsed.score
-  if (parsed.version === 2) lifted = fromVersion3(fromVersion2(lifted))
-  else if (parsed.version === 3) lifted = fromVersion3(lifted)
-  else if (parsed.version !== STORAGE_VERSION) return null
+  for (let version = from; version < STORAGE_VERSION; version++) {
+    lifted = LIFTS[version](lifted)
+  }
   return isScore(lifted) ? lifted : null
 }
 

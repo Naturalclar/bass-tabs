@@ -43,7 +43,19 @@ export function useEditor() {
   const { score, currentId, setScore } = library
   const [cursor, setCursor] = useState<Cursor>({ measure: 0, index: 0 })
   const [value, setValue] = useState<NoteValue>(4)
-  const [dotted, setDotted] = useState(false)
+  const [dotted, setDottedState] = useState(false)
+  const [triplet, setTripletState] = useState(false)
+  // Exclusive: a dotted triplet is not something anyone writes here, and
+  // `ticks` would have to pick one of the two anyway. Turning either on
+  // turns the other off, so the pair can never disagree with the duration.
+  const setDotted = useCallback((next: boolean) => {
+    setDottedState(next)
+    if (next) setTripletState(false)
+  }, [])
+  const setTriplet = useCallback((next: boolean) => {
+    setTripletState(next)
+    if (next) setDottedState(false)
+  }, [])
   const [fret, setFret] = useState(0)
   /** The string arrow keys move over and digit keys write to. */
   const [stringNumber, setStringNumber] = useState(STRINGS[STRINGS.length - 1].number)
@@ -134,13 +146,13 @@ export function useEditor() {
       setFret(clamped)
       setStringNumber(targetString)
       const slot = place(
-        { kind: 'note', notes: [{ string: targetString, fret: clamped }], value, dotted },
+        { kind: 'note', notes: [{ string: targetString, fret: clamped }], value, dotted, triplet },
         at,
         'fret',
       )
       return slot === null ? null : { at: slot, string: targetString }
     },
-    [cursor, dotted, place, value],
+    [cursor, dotted, place, triplet, value],
   )
 
   /**
@@ -188,9 +200,9 @@ export function useEditor() {
 
   const putRest = useCallback(
     (at: Cursor = cursor) => {
-      place({ kind: 'rest', value, dotted }, at)
+      place({ kind: 'rest', value, dotted, triplet }, at)
     },
-    [cursor, dotted, place, value],
+    [cursor, dotted, place, triplet, value],
   )
 
   const removeAtCursor = useCallback(() => {
@@ -305,7 +317,9 @@ export function useEditor() {
     value,
     setValue,
     dotted,
+    triplet,
     setDotted,
+    setTriplet,
     fret,
     setFret,
     stringNumber,

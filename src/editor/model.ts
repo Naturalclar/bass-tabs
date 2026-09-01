@@ -11,7 +11,9 @@ export type NoteValue = (typeof NOTE_VALUES)[number]
 
 /**
  * Divisions per quarter note. 24 is the smallest value that keeps every
- * duration we support -- down to a dotted 16th (9) -- a whole number.
+ * duration we support a whole number: a dotted 16th is 9, and every triplet
+ * lands on an integer too (an eighth triplet is 8, a 16th triplet 4), so
+ * tuplets needed no change to the grid everything else is measured on.
  */
 export const DIVISIONS = 24
 
@@ -28,7 +30,25 @@ export type Fingering = {
   fret: number
 }
 
-export type Note = {
+/**
+ * How long an entry lasts, before anything about pitch. `triplet` shortens it
+ * to two thirds -- three in the space of two -- and is exclusive with
+ * `dotted`: a dotted triplet is not a thing anyone writes here.
+ *
+ * The grouping is deliberately not in the model. A tuplet is three notes in
+ * one bracket, but keeping `Entry[]` flat is what lets every function that
+ * walks it -- edit.ts, playback.ts, the grid, measureRemaining -- stay
+ * unchanged. `musicxml.ts` derives the brackets from runs of three when it
+ * writes, which is the same division of labour as `padded()`: the model
+ * holds what was entered, the serialiser makes it well-formed notation.
+ */
+export type Duration = {
+  value: NoteValue
+  dotted: boolean
+  triplet: boolean
+}
+
+export type Note = Duration & {
   kind: 'note'
   /**
    * The strings sounding on this beat -- one for a single note, several for a
@@ -36,14 +56,10 @@ export type Note = {
    * number so two ways of entering the same chord are the same value.
    */
   notes: Fingering[]
-  value: NoteValue
-  dotted: boolean
 }
 
-export type Rest = {
+export type Rest = Duration & {
   kind: 'rest'
-  value: NoteValue
-  dotted: boolean
 }
 
 export type Entry = Note | Rest
@@ -71,8 +87,14 @@ export function clampTempo(tempo: number): number {
   return Math.min(Math.max(tempo, MIN_TEMPO), MAX_TEMPO)
 }
 
-export function ticks(value: NoteValue, dotted: boolean): number {
+/**
+ * Takes the whole duration rather than its fields: the next attribute to
+ * appear (a quintuplet, say) then reaches every caller for free instead of
+ * touching the nine call sites `triplet` would otherwise have needed.
+ */
+export function ticks({ value, dotted, triplet }: Duration): number {
   const base = WHOLE / value
+  if (triplet) return (base * 2) / 3
   return dotted ? base * 1.5 : base
 }
 
@@ -81,7 +103,7 @@ export function measureCapacity(time: TimeSignature): number {
 }
 
 export function measureFilled(entries: Entry[]): number {
-  return entries.reduce((sum, entry) => sum + ticks(entry.value, entry.dotted), 0)
+  return entries.reduce((sum, entry) => sum + ticks(entry), 0)
 }
 
 export function measureRemaining(entries: Entry[], time: TimeSignature): number {
@@ -89,8 +111,8 @@ export function measureRemaining(entries: Entry[], time: TimeSignature): number 
 }
 
 /** Whether one more entry of this length still fits in the measure. */
-export function fits(entries: Entry[], time: TimeSignature, value: NoteValue, dotted: boolean) {
-  return ticks(value, dotted) <= measureRemaining(entries, time)
+export function fits(entries: Entry[], time: TimeSignature, duration: Duration) {
+  return ticks(duration) <= measureRemaining(entries, time)
 }
 
 /** Fingerings in canonical order: string 1 (G) first. */

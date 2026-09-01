@@ -310,6 +310,99 @@ test.describe('和音', () => {
  * playing a phrase in is one run of keys, and stopping dead at a bar line --
  * with no message and nothing written -- reads as the editor being broken.
  */
+/**
+ * 3 連符 (#77)。モデルはブラケットを持たず、音符ごとの `triplet` が平らに
+ * 並ぶだけ -- グループは書き出しのときに「連続する 3 つ」から導く。だから
+ * ここで確かめるのは、長さの算術と排他と、書き出したファイルの形。
+ */
+test.describe('3 連符', () => {
+  test('8 分 3 連 3 つで 4 分 1 つぶんだけ小節が埋まる', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('e')
+    await page.keyboard.press('t')
+    for (const key of ['3', '5', '7']) await page.keyboard.press(key)
+
+    // 4/4 の残りは 4 拍 → 3 拍。ストレートの 8 分 3 つなら 2.5 拍になる。
+    await expect(page.locator('.editor-remaining')).toContainText('残り: 3 拍')
+    await expect(page.locator('.tab-cell--note')).toHaveText(['3', '5', '7'])
+    // 列の表記に 3 連が出る
+    await expect(page.locator('.tab-column__value').first()).toHaveText('♪³')
+  })
+
+  test('4/4 に 8 分 3 連はちょうど 12 個入り、13 個目は次の小節へ', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('e')
+    await page.keyboard.press('t')
+    for (let i = 0; i < 12; i++) await page.keyboard.press('0')
+    await expect(page.locator('.editor-remaining')).toContainText('残り: 0 拍')
+
+    await page.keyboard.press('0')
+    const perBar = await page
+      .locator('.tab-measure')
+      .evaluateAll((bars) => bars.map((bar) => bar.querySelectorAll('.tab-cell--note').length))
+    expect(perBar.slice(0, 2)).toEqual([12, 1])
+  })
+
+  test('付点と 3 連は排他', async ({ page }) => {
+    await openEditor(page)
+    const dot = page.locator('.chip', { hasText: '付点' })
+    const triplet = page.locator('.chip', { hasText: '3 連' })
+
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('.')
+    await expect(dot).toHaveAttribute('aria-pressed', 'true')
+
+    await page.keyboard.press('t')
+    await expect(triplet).toHaveAttribute('aria-pressed', 'true')
+    await expect(dot).toHaveAttribute('aria-pressed', 'false')
+
+    // チップからも同じ: 押した方が入り、もう片方が外れる
+    await dot.click()
+    await expect(dot).toHaveAttribute('aria-pressed', 'true')
+    await expect(triplet).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  test('3 連の譜面はリロードしても 3 連のまま', async ({ page }) => {
+    await openEditor(page)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('e')
+    await page.keyboard.press('t')
+    for (const key of ['3', '5', '7']) await page.keyboard.press(key)
+
+    await page.reload()
+    await page.locator('.tab-editor').waitFor()
+    await expect(page.locator('.tab-column__value').first()).toHaveText('♪³')
+    await expect(page.locator('.editor-remaining')).toContainText('残り: 3 拍')
+  })
+
+  test('旧形式 (v4) の保存データは 3 連なしとして読める', async ({ page }) => {
+    await openEditor(page)
+    await page.evaluate(() => {
+      localStorage.clear()
+      const score = {
+        title: 'v4 の譜面',
+        keyFifths: 0,
+        time: { beats: 4, beatType: 4 },
+        tempo: 120,
+        measures: [[{ kind: 'note', notes: [{ string: 4, fret: 3 }], value: 4, dotted: false }]],
+      }
+      localStorage.setItem('bass-tabs:score:v4-id', JSON.stringify({ version: 4, score }))
+      localStorage.setItem(
+        'bass-tabs:index',
+        JSON.stringify({ version: 4, ids: ['v4-id'], currentId: 'v4-id' }),
+      )
+    })
+    await page.reload()
+    await page.locator('.tab-editor').waitFor()
+
+    await expect(page.locator('.score-row--current')).toContainText('v4 の譜面')
+    await expect(page.locator('.tab-cell--note')).toHaveText(['3'])
+    await expect(page.locator('.tab-column__value').first()).toHaveText('♩')
+  })
+})
+
 test.describe('小節をまたぐ入力', () => {
   const perBar = (page: Page) =>
     page
@@ -669,6 +762,7 @@ test.describe('編集の純関数', () => {
     notes: [{ string, fret }],
     value: 4,
     dotted: false,
+    triplet: false,
   })
   const scoreOf = (
     measures: Entry[][],
@@ -689,7 +783,13 @@ test.describe('編集の純関数', () => {
   })
 
   test('place は 64 小節を超えて増やさない', () => {
-    const whole: Entry = { kind: 'note', notes: [{ string: 4, fret: 0 }], value: 1, dotted: false }
+    const whole: Entry = {
+      kind: 'note',
+      notes: [{ string: 4, fret: 0 }],
+      value: 1,
+      dotted: false,
+      triplet: false,
+    }
     const full = scoreOf(Array.from({ length: 64 }, () => [whole]))
     expect(place(full, q(0), { measure: 63, index: 1 })).toBeNull()
   })
@@ -707,12 +807,18 @@ test.describe('編集の純関数', () => {
       ],
       value: 4,
       dotted: false,
+      triplet: false,
     })
     const removed = toggleString(added!.score, { measure: 0, index: 0 }, 3, 0)
     expect(removed?.added).toBe(false)
     // 最後の 1 音を外すと、拍を保ったまま休符が残る
     const rested = toggleString(removed!.score, { measure: 0, index: 0 }, 4, 0)
-    expect(rested?.score.measures[0][0]).toEqual({ kind: 'rest', value: 4, dotted: false })
+    expect(rested?.score.measures[0][0]).toEqual({
+      kind: 'rest',
+      value: 4,
+      dotted: false,
+      triplet: false,
+    })
     // 書かれていない列には toggle するものが無い（呼び出し側が新しく置く）
     expect(toggleString(one, { measure: 0, index: 1 }, 3, 0)).toBeNull()
   })
@@ -749,6 +855,7 @@ test.describe('編集の純関数', () => {
       ],
       value: 4,
       dotted: false,
+      triplet: false,
     }
     expect(moveBeat(scoreOf([[chord]]), { measure: 0, index: 0 }, { semitones: -1 })).toBeNull()
     const up = moveBeat(scoreOf([[chord]]), { measure: 0, index: 0 }, { semitones: 1 })

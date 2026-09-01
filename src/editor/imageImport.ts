@@ -215,9 +215,15 @@ export async function readTabEntries(image: ImageData): Promise<TabEntriesResult
       else unread++
     }
     if (fingerings.length > 0) {
-      entries.push({ kind: 'note', notes: fingerings, value: IMPORT_VALUE, dotted: false })
+      entries.push({
+        kind: 'note',
+        notes: fingerings,
+        value: IMPORT_VALUE,
+        dotted: false,
+        triplet: false,
+      })
     } else {
-      entries.push({ kind: 'rest', value: IMPORT_VALUE, dotted: false })
+      entries.push({ kind: 'rest', value: IMPORT_VALUE, dotted: false, triplet: false })
     }
   }
   return { ok: true, entries, unread }

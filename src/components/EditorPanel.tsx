@@ -19,6 +19,7 @@ type Props = {
   measureCount: number
   value: NoteValue
   dotted: boolean
+  triplet: boolean
   fret: number
   remaining: number
   midi: MidiStatus
@@ -33,6 +34,7 @@ type Props = {
   onMeasureCount: (count: number) => void
   onValue: (value: NoteValue) => void
   onDotted: (dotted: boolean) => void
+  onTriplet: (triplet: boolean) => void
   onFret: (fret: number) => void
   onRest: () => void
   onDelete: () => void
@@ -236,6 +238,15 @@ export function EditorPanel(props: Props) {
             onClick={() => props.onDotted(!props.dotted)}
           >
             付点
+          </button>
+          {/* Exclusive with 付点 -- pressing one releases the other. */}
+          <button
+            type="button"
+            className={`chip${props.triplet ? ' chip--on' : ''}`}
+            aria-pressed={props.triplet}
+            onClick={() => props.onTriplet(!props.triplet)}
+          >
+            3 連
           </button>
         </div>
 

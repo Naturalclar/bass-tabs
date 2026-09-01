@@ -79,15 +79,24 @@ Two things constrain `musicxml.ts`:
   written twice with a `<backup>` between. That file is the one the print checks already prove OSMD
   renders; a different shape means re-verifying OSMD's layout from scratch.
 - `DIVISIONS` is 24 because that is the smallest value keeping every supported duration a whole
-  number, down to a dotted 16th (9).
+  number, down to a dotted 16th (9) -- and it divides by three as well, so triplets (an eighth
+  triplet is 8, a 16th triplet 4) needed no change to the grid.
+
+An entry's length is a `Duration` — `value`, `dotted`, `triplet`, the last two exclusive — and
+`ticks()` takes the whole thing rather than its fields, so the next attribute reaches all nine
+call sites for free. Tuplets are deliberately *not* grouped in the model: `Entry[]` stays flat,
+so everything that walks it (`edit.ts`, `playback.ts`, the grid, `measureRemaining`) is
+unchanged, and `musicxml.ts` derives the `<tuplet>` brackets from runs of three when it writes.
+A partial group is closed with triplet rests there too — the same division of labour as
+`padded()`: the model holds what was entered, the serialiser makes it well-formed notation.
 
 A beat (`Note`) holds a `notes` array -- one fingering for a single note, several for a
 chord, unique strings, sorted by string number. Clicking a lane of an existing column
 *toggles* that string in or out (`toggleNoteAt`); the keyboard and MIDI write single notes
 (`putNote`). Removing the last string of a beat leaves a rest, so the rhythm never shifts.
-Arrow-key moves act on the whole chord or not at all. `STORAGE_VERSION` is 3; version 2
-(single-note shape) is lifted in place by `fromVersion2` rather than discarded, because
-people already had scores saved.
+Arrow-key moves act on the whole chord or not at all. A stored score is never discarded over a
+shape change: `readScore` walks the one-step lifts (`fromVersion2` onward) from whatever version
+it was written at, because people already had scores saved.
 
 Editing is split in three. `edit.ts` holds the score transformations as pure functions (`Score`
 in, `Score` out; null means "this edit has nowhere to go") — tested directly in
@@ -168,8 +177,8 @@ tested without an AudioContext in `tests/playback.spec.ts`; the hook is the only
 Audio. Tempo lives on `Score` (`tempo`, quarter-note BPM whatever the meter): it is printed as
 ♩=N via `tempoXml()` in musicxml.ts, written to the exported file as `<sound tempo>`, read back
 by the importer, and changed through `commit()` (one `CommitKey`, so an adjustment is one undo
-step). `STORAGE_VERSION` is 4; version 3 scores are lifted with the default tempo, the same
-style as `fromVersion2`. Playback stops when the open score changes, per the rule below about
+step). `STORAGE_VERSION` is 5; older scores walk a chain of one-step lifts (`fromVersion2`
+onward, the newest filling in `triplet: false`) rather than being discarded. Playback stops when the open score changes, per the rule below about
 remembered positions, and when leaving the editor (in video mode it would bleed into the
 capture).
 
