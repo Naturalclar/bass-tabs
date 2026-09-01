@@ -131,7 +131,7 @@ test.describe('再生のスケジュール', () => {
   const scoreOf = (
     measures: Entry[][],
     time: TimeSignature = { beats: 4, beatType: 4 },
-  ): Score => ({ title: '', keyFifths: 0, time, tempo: 160, measures })
+  ): Score => ({ title: '', keyFifths: 0, time, tempo: 160, tuning: 'four', measures })
 
   test('columnAt と ticksAt は互いの逆で、書きかけの小節の尻は null', () => {
     const score = scoreOf([[note(0), note(2)], [note(5)]])
@@ -170,6 +170,20 @@ test.describe('再生のスケジュール', () => {
     const notes = schedule(scoreOf([[trip(0), trip(0), trip(0), note(0)]]))
     expect(notes.map((n) => n.startTicks)).toEqual([0, 8, 16, 24])
     expect(notes.map((n) => n.durationTicks)).toEqual([8, 8, 8, 24])
+  })
+
+  test('5 弦の B は実音で鳴る', () => {
+    // B0 は MIDI 23。5 弦の音は 4 弦の譜面では出せないので、鳴らす高さが
+    // 譜面のチューニングから来ていることの確認になる。
+    const onB: Entry = {
+      kind: 'note',
+      notes: [{ string: 5, fret: 0 }],
+      value: 4,
+      dotted: false,
+      triplet: false,
+    }
+    const five = { ...scoreOf([[onB]]), tuning: 'five' as const }
+    expect(schedule(five)).toEqual([{ midi: 23, startTicks: 0, durationTicks: quarter }])
   })
 
   test('和音は同じ時刻に全部鳴る', () => {

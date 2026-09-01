@@ -42,7 +42,7 @@ export default function App() {
     void loadScore(editor.musicXml, editor.score.title)
   }, [editor.musicXml, editor.score.title, loadScore, mode])
 
-  const midi = useMidiInput(editor.putNote)
+  const midi = useMidiInput(editor.putNote, editor.score.tuning)
 
   const playback = usePlayback(editor.score)
   const stopPlayback = playback.stop
@@ -148,6 +148,7 @@ export default function App() {
                 title={editor.score.title}
                 time={editor.score.time}
                 keyFifths={editor.score.keyFifths}
+                tuning={editor.score.tuning}
                 measureCount={editor.score.measures.length}
                 value={editor.value}
                 dotted={editor.dotted}
@@ -163,6 +164,7 @@ export default function App() {
                 onTitle={editor.setTitle}
                 onTime={editor.setTime}
                 onKeyFifths={editor.setKeyFifths}
+                onTuning={editor.setTuning}
                 onMeasureCount={editor.setMeasureCount}
                 onValue={editor.setValue}
                 onDotted={editor.setDotted}
@@ -180,6 +182,7 @@ export default function App() {
               <TabEditor
                 measures={editor.score.measures}
                 time={editor.score.time}
+                tuning={editor.score.tuning}
                 cursor={editor.cursor}
                 playingAt={playback.position}
                 onPlace={keyboard.clickLane}

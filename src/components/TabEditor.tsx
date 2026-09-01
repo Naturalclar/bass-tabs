@@ -1,10 +1,11 @@
 import { measureRemaining, type Entry, type TimeSignature } from '../editor/model.ts'
-import { STRINGS } from '../editor/tuning.ts'
+import { TUNINGS, type TuningName } from '../editor/tuning.ts'
 import type { Cursor } from '../editor/useEditor.ts'
 
 type Props = {
   measures: Entry[][]
   time: TimeSignature
+  tuning: TuningName
   cursor: Cursor
   /** The column playback is sounding right now, if any. */
   playingAt: Cursor | null
@@ -40,7 +41,7 @@ function entryLabel(entry: Entry): string {
  * Each measure ends with an append slot, dropped once the measure is full: a
  * slot that can only refuse what you put in it is worse than no slot.
  */
-export function TabEditor({ measures, time, cursor, playingAt, onPlace, onPlayFrom, onKeyDown }: Props) {
+export function TabEditor({ measures, time, tuning, cursor, playingAt, onPlace, onPlayFrom, onKeyDown }: Props) {
   return (
     <div
       className="tab-editor"
@@ -78,7 +79,7 @@ export function TabEditor({ measures, time, cursor, playingAt, onPlace, onPlayFr
                   key={index}
                 >
                   <span className="tab-column__value">{entry ? entryLabel(entry) : '+'}</span>
-                  {STRINGS.map((string) => {
+                  {TUNINGS[tuning].map((string) => {
                     const here =
                       entry?.kind === 'note'
                         ? entry.notes.find((note) => note.string === string.number)

@@ -19,7 +19,7 @@ import {
   type Score,
   type TimeSignature,
 } from './model.ts'
-import { restring, transpose } from './tuning.ts'
+import { TUNINGS, restring, transpose } from './tuning.ts'
 
 /** Where the next entry goes: which measure, and how far into it. */
 export type Cursor = { measure: number; index: number }
@@ -301,8 +301,9 @@ export function moveBeat(
   if (index === null) return null
   const entry = entriesAt(score, cursor.measure)[index]
   if (entry.kind !== 'note') return null
+  const tuning = TUNINGS[score.tuning]
   const moved = entry.notes.map((note) =>
-    semitones ? transpose(note, semitones) : restring(note, strings),
+    semitones ? transpose(tuning, note, semitones) : restring(tuning, note, strings),
   )
   if (moved.some((note) => note === null)) return null
   const landed = sortedFingerings(moved as Fingering[])

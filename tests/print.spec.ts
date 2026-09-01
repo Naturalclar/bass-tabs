@@ -22,6 +22,10 @@ const SAMPLES = [
   // Same score with measure 2 rewritten as four eighth-note triplets: the
   // tuplet brackets must not repaginate the document (#77).
   { file: 'bass-tab-triplets.musicxml', pages: 2 },
+  // Same score on a five-string bass. The tab staff is a line taller, which
+  // is exactly the kind of change that moves page breaks (#74) -- measured,
+  // it still lands on two.
+  { file: 'bass-tab-5string.musicxml', pages: 2 },
 ]
 
 
@@ -67,6 +71,44 @@ test('三連符のブラケットと 3 が両方の譜表に出る', async ({ pa
     .locator('svg.score-page text')
     .evaluateAll((nodes) => nodes.filter((node) => node.textContent?.trim() === '3').length)
   expect(threes).toBeGreaterThanOrEqual(8)
+})
+
+/**
+ * The lines of the first system's tab staff. OSMD draws staff lines as wide,
+ * hair-thin `<path>`s; the notation staff is always the first five, and the
+ * tab staff is the group under it (its lines sit further apart, so a gap
+ * threshold separates the two staves cleanly).
+ */
+async function tabStaffLines(page: Page): Promise<number> {
+  return page.locator('svg.score-page').first().evaluate((svg) => {
+    const rows = [
+      ...new Set(
+        [...svg.querySelectorAll('path')]
+          .map((node) => node.getBBox())
+          .filter((box) => box.width > 150 && box.height <= 4)
+          .map((box) => Math.round(box.y)),
+      ),
+    ].sort((a, b) => a - b)
+    // Past the five notation lines, take the run that stays close together.
+    const tab = rows.slice(5)
+    let count = 0
+    for (const [index, y] of tab.entries()) {
+      if (index > 0 && y - tab[index - 1] > 20) break
+      count++
+    }
+    return count
+  })
+}
+
+test('TAB 譜の線の数は宣言した弦の数になる', async ({ page }) => {
+  // Paired on purpose: the same score, four strings and five. Reading only
+  // the five-string one could pass on a hard-coded 5, and reading only the
+  // four-string one is what the suite already did.
+  await openSample(page, 'bass-tab.musicxml')
+  expect(await tabStaffLines(page)).toBe(4)
+
+  await openSample(page, 'bass-tab-5string.musicxml')
+  expect(await tabStaffLines(page)).toBe(5)
 })
 
 test('page breaks are assigned by index, not by :last-of-type', async ({ page }) => {

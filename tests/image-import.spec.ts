@@ -263,6 +263,60 @@ test.describe('画像からの取り込み', () => {
     expect(cells).toEqual(['1G3', '1A5'])
   })
 
+  /**
+   * 5 弦のタブ譜の画像 (#74)。読み取りは「ちょうど 4 本の等間隔」という
+   * 幾何で譜面を見つけており、その厳しさが五線譜や 6 弦ギターと区別する
+   * 判別器そのものになっている。5 本を 4 本として読めば、正しく見える
+   * 間違った音が入る -- だから今は断るのが正解で、5 弦の読み取りは
+   * 判別方法を作り直してからになる。
+   */
+  test('5 本線のタブ譜の画像は読まずに断る', async ({ page }) => {
+    const image = await screenshotTab(
+      page,
+      'five-lane.png',
+      tabHtml({
+        lineCount: 5,
+        notes: [
+          { lane: 4, x: 60, text: '5' },
+          { lane: 0, x: 200, text: '7' },
+        ],
+      }),
+    )
+    await openEditor(page)
+    await importImage(page, image)
+
+    await expect(page.locator('.sidebar__notice')).toContainText('弦の線が見つかりませんでした')
+    await expect(page.locator('.score-row')).toHaveCount(1)
+  })
+
+  test('5 弦の譜面に 4 本線の画像を読み込むと上 4 弦に乗る', async ({ page }) => {
+    test.setTimeout(120_000)
+    // `<string>` は高い方から数えるので、G/D/A/E の番号は 4 弦でも 5 弦でも
+    // 同じ 1..4。だから 4 弦のタブ譜の画像は、5 弦の譜面でも正しい弦に載る。
+    const image = await screenshotTab(
+      page,
+      'four-into-five.png',
+      tabHtml({
+        notes: [
+          { lane: 3, x: 60, text: '5' },
+          { lane: 0, x: 200, text: '7' },
+        ],
+      }),
+    )
+    await openEditor(page)
+    await page.getByLabel('チューニング').selectOption('five')
+    await importImage(page, image)
+
+    const notes = await page
+      .locator('.tab-cell--note')
+      .evaluateAll((cells) =>
+        cells.map(
+          (cell) => (cell.getAttribute('aria-label') ?? '').match(/([GDAEB]) 弦$/)?.[1] + cell.textContent,
+        ),
+      )
+    expect(notes).toEqual(['E5', 'G7'])
+  })
+
   test('弦の線が無い画像は取り込まず、理由を出す', async ({ page }) => {
     const image = await screenshotTab(
       page,

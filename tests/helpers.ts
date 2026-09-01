@@ -43,13 +43,16 @@ export function tabHtml(opts: {
   dark?: boolean
   /** Draw digits straight over the lines, no backing patch -- the hard case. */
   plain?: boolean
+  /** How many string lines to draw. Four unless a test is about the count. */
+  lineCount?: number
   notes: { lane: number; x: number; text: string }[]
 }) {
   const ink = opts.dark ? '#eee' : '#111'
   const paper = opts.dark ? '#181818' : '#fff'
-  const lanes = [30, 60, 90, 120]
+  const lanes = Array.from({ length: opts.lineCount ?? 4 }, (_, index) => 30 + index * 30)
+  const height = lanes[lanes.length - 1] + 30
   return `
-    <div id="tab" style="position:relative;width:640px;height:150px;background:${paper};font:700 20px monospace;color:${ink}">
+    <div id="tab" style="position:relative;width:640px;height:${height}px;background:${paper};font:700 20px monospace;color:${ink}">
       ${lanes
         .map(
           (y) =>

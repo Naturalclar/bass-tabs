@@ -8,7 +8,7 @@ import {
   type Score,
   type TimeSignature,
 } from './model.ts'
-import { MAX_FRET, STRINGS } from './tuning.ts'
+import { MAX_FRET, TUNINGS, type TuningName } from './tuning.ts'
 
 /**
  * Reading and writing the one saved score.
@@ -45,7 +45,7 @@ const SCORE_KEY_PREFIX = 'bass-tabs:score:'
  * changes in a way the validator below would still accept -- a renamed field
  * with a compatible type, a changed unit, a changed meaning.
  */
-const STORAGE_VERSION = 5
+const STORAGE_VERSION = 6
 
 const BEAT_TYPES = [1, 2, 4, 8, 16]
 
@@ -65,10 +65,15 @@ function isTimeSignature(value: unknown): value is TimeSignature {
   )
 }
 
-function isFingering(value: unknown): value is { string: number; fret: number } {
+function isFingering(
+  value: unknown,
+  tuning: TuningName,
+): value is { string: number; fret: number } {
   if (!isRecord(value)) return false
-  // An unknown string number reaches `stringByNumber`, which throws by design.
-  if (!STRINGS.some((string) => string.number === value.string)) return false
+  // An unknown string number reaches `stringByNumber`, which throws by design
+  // -- and "unknown" depends on the score's own tuning, so a five-string note
+  // in a four-string score is exactly as invalid as a sixth string would be.
+  if (!TUNINGS[tuning].some((string) => string.number === value.string)) return false
   return (
     typeof value.fret === 'number' &&
     Number.isInteger(value.fret) &&
@@ -77,7 +82,7 @@ function isFingering(value: unknown): value is { string: number; fret: number } 
   )
 }
 
-function isEntry(value: unknown): value is Entry {
+function isEntry(value: unknown, tuning: TuningName): value is Entry {
   if (!isRecord(value)) return false
   if (typeof value.dotted !== 'boolean') return false
   if (typeof value.triplet !== 'boolean') return false
@@ -89,7 +94,7 @@ function isEntry(value: unknown): value is Entry {
   if (value.kind === 'rest') return true
   if (value.kind !== 'note') return false
   if (!Array.isArray(value.notes) || value.notes.length === 0) return false
-  if (!value.notes.every((note) => isFingering(note))) return false
+  if (!value.notes.every((note) => isFingering(note, tuning))) return false
   // The same string cannot sound twice in one beat.
   return new Set(value.notes.map((note) => (note as { string: number }).string)).size ===
     value.notes.length
@@ -108,10 +113,12 @@ export function isScore(value: unknown): value is Score {
     return false
   }
   if (!isTimeSignature(value.time)) return false
+  if (typeof value.tuning !== 'string' || !(value.tuning in TUNINGS)) return false
+  const tuning = value.tuning as TuningName
   if (!Array.isArray(value.measures)) return false
   if (value.measures.length < 1 || value.measures.length > MAX_MEASURES) return false
   return value.measures.every(
-    (measure) => Array.isArray(measure) && measure.every((entry) => isEntry(entry)),
+    (measure) => Array.isArray(measure) && measure.every((entry) => isEntry(entry, tuning)),
   )
 }
 
@@ -178,6 +185,12 @@ function fromVersion3(value: unknown): unknown {
   return { ...value, tempo: emptyScore().tempo }
 }
 
+/** Version 5 had no tuning: every score it stored was a four-string one. */
+function fromVersion5(value: unknown): unknown {
+  if (!isRecord(value)) return value
+  return { ...value, tuning: 'four' }
+}
+
 /** Version 4 had no tuplets: every entry it stored was a straight one. */
 function fromVersion4(value: unknown): unknown {
   if (!isRecord(value) || !Array.isArray(value.measures)) return value
@@ -201,6 +214,7 @@ function readScore(id: ScoreId): Score | null {
     2: fromVersion2,
     3: fromVersion3,
     4: fromVersion4,
+    5: fromVersion5,
   }
   const from = parsed.version
   if (typeof from !== 'number' || from < 2 || from > STORAGE_VERSION) return null

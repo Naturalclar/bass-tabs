@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { positionFor } from './tuning.ts'
+import { TUNINGS, positionFor, type TuningName } from './tuning.ts'
 
 /**
  * Note entry from a MIDI keyboard, via the Web MIDI API.
@@ -21,7 +21,10 @@ type MidiNavigator = Navigator & {
 
 const NOTE_ON = 0x90
 
-export function useMidiInput(onNote: (stringNumber: number, fret: number) => void) {
+export function useMidiInput(
+  onNote: (stringNumber: number, fret: number) => void,
+  tuning: TuningName,
+) {
   // Whether the API exists is knowable before the first paint, so it is the
   // initial state rather than an effect that immediately re-renders.
   const [status, setStatus] = useState<MidiStatus>(() =>
@@ -33,6 +36,13 @@ export function useMidiInput(onNote: (stringNumber: number, fret: number) => voi
   useEffect(() => {
     handler.current = onNote
   }, [onNote])
+  // Same reason as the handler: the port must not be re-subscribed when the
+  // open score changes, but a five-string score has to reach notes a
+  // four-string one cannot play.
+  const strings = useRef(tuning)
+  useEffect(() => {
+    strings.current = tuning
+  }, [tuning])
 
   const connect = useCallback(async () => {
     const request = (navigator as MidiNavigator).requestMIDIAccess
@@ -52,7 +62,7 @@ export function useMidiInput(onNote: (stringNumber: number, fret: number) => voi
           // Many controllers send note-off as a note-on with zero velocity, so
           // velocity has to be checked as well as the command.
           if (command !== NOTE_ON || velocity === 0) return
-          const position = positionFor(note)
+          const position = positionFor(TUNINGS[strings.current], note)
           if (position) handler.current(position.string, position.fret)
         }
       }

@@ -184,7 +184,17 @@ capture).
 
 MusicXML's two numbering schemes run in opposite directions and are the easiest thing to break:
 `<string>` counts from the highest-pitched string (G is 1), `<staff-tuning line>` counts from the
-bottom staff line (low E is 1). `tuning.ts` holds the conversion; don't inline the arithmetic.
+bottom staff line (the lowest string is 1). `tuning.ts` holds the conversion; don't inline the
+arithmetic.
+
+Nothing about strings is a module constant: a `Tuning` is data and every function in `tuning.ts`
+takes the one it works in, because the tuning belongs to the score (`Score.tuning`, four- or
+five-string). That is what lets a library hold both at once and an imported file keep the tuning
+it declares. Because `<string>` counts from the top, G–D–A–E keep numbers 1–4 in both tunings —
+which is why a four-string tab read from an image lands correctly in a five-string score.
+Image and video import stay four-string only: `LANES = 4` in `tabImage.ts` is not a count but the
+discriminator that tells a bass tab from a five-line notation staff or a six-string tab, and
+loosening it needs a different discriminator first (see README).
 
 Rendering happens at a fixed pixel width on purpose: OSMD lays out in resolution-independent
 units, so pinning the width keeps line and page breaks from moving with the window, and CSS

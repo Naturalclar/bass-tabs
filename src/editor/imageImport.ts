@@ -236,7 +236,15 @@ export async function fromTabImage(file: File, title: string): Promise<ImageImpo
   const result = await readTabEntries(image)
   if (!result.ok) return { ok: false, reason: result.reason }
 
-  const base = { title, time: { beats: 4, beatType: 4 }, keyFifths: 0, tempo: emptyScore().tempo }
+  // Recognition reads a four-string tab, and the top four strings keep
+  // their numbers in every offered tuning, so the default is the safe one.
+  const base = {
+    title,
+    time: { beats: 4, beatType: 4 },
+    keyFifths: 0,
+    tempo: emptyScore().tempo,
+    tuning: emptyScore().tuning,
+  }
   const measures = intoMeasures(result.entries, base)
   if (measures.length > MAX_MEASURES) return { ok: false, reason: 'too-long' }
   return { ok: true, score: { ...base, measures }, unread: result.unread }
