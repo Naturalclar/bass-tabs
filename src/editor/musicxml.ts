@@ -1,5 +1,5 @@
 import { DIVISIONS, measureCapacity, ticks, type Entry, type NoteValue, type Score } from './model.ts'
-import { STRINGS, midiFor, pitchFor, staffLine } from './tuning.ts'
+import { TUNINGS, midiFor, pitchFor, staffLine, type Tuning } from './tuning.ts'
 
 /**
  * Serialises the editor's model to MusicXML.
@@ -117,6 +117,7 @@ function noteXml(
   entry: Entry,
   staff: 1 | 2,
   keyFifths: number,
+  tuning: Tuning,
   /** 0, 1 or 2 within a triplet; null outside one. */
   tuplet: number | null,
 ): string {
@@ -158,7 +159,7 @@ function noteXml(
   return entry.notes
     .map((fingering, index) => {
       const { step, alter, octave } = pitchFor(
-        midiFor(fingering.string, fingering.fret) + WRITTEN_OCTAVE_SHIFT,
+        midiFor(tuning, fingering.string, fingering.fret) + WRITTEN_OCTAVE_SHIFT,
         keyFifths,
       )
       // The bracket belongs to the beat, so only the first chord tone carries
@@ -184,11 +185,12 @@ function noteXml(
 }
 
 function attributesXml(score: Score): string {
-  const tunings = [...STRINGS]
-    .sort((a, b) => staffLine(a.number) - staffLine(b.number))
+  const tuning = TUNINGS[score.tuning]
+  const tunings = [...tuning]
+    .sort((a, b) => staffLine(tuning, a.number) - staffLine(tuning, b.number))
     .map(
       (s) =>
-        `          <staff-tuning line="${staffLine(s.number)}">` +
+        `          <staff-tuning line="${staffLine(tuning, s.number)}">` +
         `<tuning-step>${s.step}</tuning-step>` +
         `<tuning-octave>${s.octave + 1}</tuning-octave></staff-tuning>\n`,
     )
@@ -211,7 +213,7 @@ function attributesXml(score: Score): string {
     '        <clef number="1"><sign>F</sign><line>4</line></clef>\n' +
     '        <clef number="2"><sign>TAB</sign><line>5</line></clef>\n' +
     '        <staff-details number="2" print-object="yes">\n' +
-    `          <staff-lines>${STRINGS.length}</staff-lines>\n` +
+    `          <staff-lines>${tuning.length}</staff-lines>\n` +
     tunings +
     '        </staff-details>\n' +
     '      </attributes>\n'
@@ -241,8 +243,11 @@ export function toMusicXml(score: Score): string {
     .map((entries, index) => {
       const full = padded(entries, capacity)
       const tuplets = tupletPositions(full)
-      const notation = full.map((e, i) => noteXml(e, 1, score.keyFifths, tuplets[i])).join('')
-      const tab = full.map((e, i) => noteXml(e, 2, score.keyFifths, tuplets[i])).join('')
+      const tuning = TUNINGS[score.tuning]
+      const notation = full
+        .map((e, i) => noteXml(e, 1, score.keyFifths, tuning, tuplets[i]))
+        .join('')
+      const tab = full.map((e, i) => noteXml(e, 2, score.keyFifths, tuning, tuplets[i])).join('')
       return (
         `    <measure number="${index + 1}">\n` +
         (index === 0 ? attributesXml(score) + tempoXml(score.tempo) : '') +

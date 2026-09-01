@@ -276,6 +276,59 @@ test.describe('書き出しと取り込み', () => {
     await expect(page.locator('.sidebar__notice')).toContainText('1 曲を取り込みました')
   })
 
+  test('5 弦は書き出して取り込んでも 5 弦のまま', async ({ page }) => {
+    await openEditor(page)
+    await page.getByLabel('チューニング').selectOption('five')
+    await page.getByRole('button', { name: '1 小節目 1 番目 B 弦' }).click()
+
+    const download = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: 'MusicXML を書き出す' }).click(),
+    ]).then(([event]) => event)
+    const saved = join(fixtures, 'five.musicxml')
+    await download.saveAs(saved)
+    const xml = readFileSync(saved, 'utf8')
+    expect(xml).toContain('<staff-lines>5</staff-lines>')
+    expect(xml).toContain('<tuning-step>B</tuning-step>')
+
+    await page.setInputFiles('.sidebar input[type="file"]', saved)
+    await expect(page.locator('.sidebar__notice')).toContainText('1 曲を取り込みました')
+    // 宣言を読んでいる証拠: 5 弦として戻り、B 弦のレーンがある
+    await expect(page.getByLabel('チューニング')).toHaveValue('five')
+    const lanes = await page
+      .locator('.tab-measure')
+      .first()
+      .locator('.tab-column')
+      .first()
+      .locator('.tab-cell')
+      .count()
+    expect(lanes).toBe(5)
+  })
+
+  test('持てないチューニングの MusicXML は取り込まず、理由を出す', async ({ page }) => {
+    await openEditor(page)
+
+    // 6 弦ギター: 弦番号だけ見れば 1..6 で、4 弦として読むと低音側が全部
+    // 範囲外になる。開放弦の音まで見て、持てないものは断る。
+    const details =
+      '<staff-details number="2" print-object="yes"><staff-lines>6</staff-lines>' +
+      ['E:2', 'A:2', 'D:3', 'G:3', 'B:3', 'E:4']
+        .map(
+          (spec, index) =>
+            `<staff-tuning line="${index + 1}"><tuning-step>${spec.split(':')[0]}</tuning-step>` +
+            `<tuning-octave>${spec.split(':')[1]}</tuning-octave></staff-tuning>`,
+        )
+        .join('') +
+      '</staff-details>'
+    const sixString = tabXml(1, quarterOn(4, 0)).replace('</attributes>', `${details}</attributes>`)
+    await page.setInputFiles(
+      '.sidebar input[type="file"]',
+      fixture('six-string.musicxml', sixString),
+    )
+    await expect(page.locator('.sidebar__notice')).toContainText('タイ・装飾音')
+    await expect(page.locator('.score-row')).toHaveCount(1)
+  })
+
   test('3 連は書き出して取り込んでも 3 連のまま', async ({ page }) => {
     await openEditor(page)
     await page.locator('.tab-editor').focus()

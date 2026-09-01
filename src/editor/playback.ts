@@ -13,7 +13,7 @@
  */
 
 import { DIVISIONS, clampTempo, measureCapacity, ticks, type Score } from './model.ts'
-import { midiFor } from './tuning.ts'
+import { TUNINGS, midiFor } from './tuning.ts'
 
 /** One note to sound. Times are in ticks: DIVISIONS per quarter note. */
 export type PlaybackNote = { midi: number; startTicks: number; durationTicks: number }
@@ -68,6 +68,7 @@ export function ticksAt(score: Score, at: { measure: number; index: number }): n
 
 export function schedule(score: Score): PlaybackNote[] {
   const capacity = measureCapacity(score.time)
+  const tuning = TUNINGS[score.tuning]
   const notes: PlaybackNote[] = []
   score.measures.forEach((entries, measure) => {
     let at = measure * capacity
@@ -78,7 +79,7 @@ export function schedule(score: Score): PlaybackNote[] {
         // string, all sharing the beat's start and length.
         for (const fingering of entry.notes) {
           notes.push({
-            midi: midiFor(fingering.string, fingering.fret),
+            midi: midiFor(tuning, fingering.string, fingering.fret),
             startTicks: at,
             durationTicks: duration,
           })

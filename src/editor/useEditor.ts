@@ -8,7 +8,7 @@ import {
   type TimeSignature,
 } from './model.ts'
 import { toMusicXml } from './musicxml.ts'
-import { MAX_FRET, STRINGS } from './tuning.ts'
+import { FOUR_STRING, MAX_FRET, TUNINGS, type TuningName } from './tuning.ts'
 import { useLibrary } from './useLibrary.ts'
 import * as edit from './edit.ts'
 import type { Cursor } from './edit.ts'
@@ -58,7 +58,7 @@ export function useEditor() {
   }, [])
   const [fret, setFret] = useState(0)
   /** The string arrow keys move over and digit keys write to. */
-  const [stringNumber, setStringNumber] = useState(STRINGS[STRINGS.length - 1].number)
+  const [stringNumber, setStringNumber] = useState(FOUR_STRING[FOUR_STRING.length - 1].number)
   const [past, setPast] = useState<Snapshot[]>([])
   const [future, setFuture] = useState<Snapshot[]>([])
   /** The key of the last commit, for collapsing a run of edits into one step. */
@@ -248,6 +248,32 @@ export function useEditor() {
     [commit, cursor, score],
   )
 
+  /**
+   * Changing the tuning is a score edit like any other -- undoable, saved.
+   * Notes on a string the new tuning does not have would be unplayable, so
+   * they are dropped: only the fifth string can disappear, and only when
+   * someone deliberately narrows the instrument.
+   */
+  const setTuning = useCallback(
+    (name: TuningName) => {
+      const strings = TUNINGS[name]
+      const measures = score.measures.map((entries) =>
+        entries.flatMap((entry): Entry[] => {
+          if (entry.kind !== 'note') return [entry]
+          const kept = entry.notes.filter((note) =>
+            strings.some((string) => string.number === note.string),
+          )
+          if (kept.length === entry.notes.length) return [entry]
+          return kept.length > 0
+            ? [{ ...entry, notes: kept }]
+            : [{ kind: 'rest', value: entry.value, dotted: entry.dotted, triplet: entry.triplet }]
+        }),
+      )
+      commit({ ...score, tuning: name, measures }, cursor, 'tuning')
+    },
+    [commit, cursor, score],
+  )
+
   const setKeyFifths = useCallback(
     (keyFifths: number) => {
       commit({ ...score, keyFifths }, cursor)
@@ -337,6 +363,7 @@ export function useEditor() {
     setTime,
     setKeyFifths,
     setTempo,
+    setTuning,
     setTitle,
     setMeasureCount,
     scores: library.scores,

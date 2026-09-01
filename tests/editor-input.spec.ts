@@ -403,6 +403,131 @@ test.describe('3 連符', () => {
   })
 })
 
+/**
+ * 5 弦ベース (#74)。チューニングは譜面ごとのデータ (`Score.tuning`) で、
+ * アプリ全体の設定ではない -- 一覧に 4 弦と 5 弦が同居でき、取り込んだ
+ * ファイルは自分の宣言したチューニングを保つ。
+ */
+test.describe('5 弦', () => {
+  const laneLabels = (page: Page) =>
+    page
+      .locator('.tab-measure')
+      .first()
+      .locator('.tab-column')
+      .first()
+      .locator('.tab-cell')
+      .evaluateAll((cells) =>
+        cells.map((cell) => (cell.getAttribute('aria-label') ?? '').match(/([GDAEB]) 弦$/)?.[1]),
+      )
+
+  test('チューニングを変えるとレーンが 5 本になり、B 弦に書ける', async ({ page }) => {
+    await openEditor(page)
+    expect(await laneLabels(page)).toEqual(['G', 'D', 'A', 'E'])
+
+    await page.getByLabel('チューニング').selectOption('five')
+    expect(await laneLabels(page)).toEqual(['G', 'D', 'A', 'E', 'B'])
+
+    await page.getByRole('button', { name: '1 小節目 1 番目 B 弦' }).click()
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('3')
+    const note = await page
+      .locator('.tab-cell--note')
+      .evaluateAll((cells) =>
+        cells.map(
+          (cell) => (cell.getAttribute('aria-label') ?? '').match(/([GDAEB]) 弦$/)?.[1] + cell.textContent,
+        ),
+      )
+    expect(note).toEqual(['B3'])
+  })
+
+  test('5 弦の譜面はリロードしても 5 弦のまま', async ({ page }) => {
+    await openEditor(page)
+    await page.getByLabel('チューニング').selectOption('five')
+    await page.getByRole('button', { name: '1 小節目 1 番目 B 弦' }).click()
+
+    await page.reload()
+    await page.locator('.tab-editor').waitFor()
+    await expect(page.getByLabel('チューニング')).toHaveValue('five')
+    expect(await laneLabels(page)).toEqual(['G', 'D', 'A', 'E', 'B'])
+  })
+
+  test('4 弦に戻すと B 弦の音は落ちるが、取り消しで戻る', async ({ page }) => {
+    await openEditor(page)
+    await page.getByLabel('チューニング').selectOption('five')
+    await page.getByRole('button', { name: '1 小節目 1 番目 B 弦' }).click()
+    await expect(page.locator('.tab-cell--note')).toHaveCount(1)
+
+    // 4 弦に無い弦の音は鳴らせないので落とす。拍は残るので休符になる。
+    await page.getByLabel('チューニング').selectOption('four')
+    await expect(page.locator('.tab-cell--note')).toHaveCount(0)
+    await expect(page.locator('.tab-column__rest')).toHaveCount(1)
+
+    // チューニングの変更も commit() を通る = 取り消しの対象 (#70 と同じ)
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect(page.getByLabel('チューニング')).toHaveValue('five')
+    await expect(page.locator('.tab-cell--note')).toHaveCount(1)
+  })
+
+  test('Shift+↑ は B 弦から先へは行かない', async ({ page }) => {
+    await openEditor(page)
+    await page.getByLabel('チューニング').selectOption('five')
+    await page.getByRole('button', { name: '1 小節目 1 番目 E 弦' }).click()
+    await page.locator('.tab-editor').focus()
+    await page.keyboard.press('5')
+
+    // E 弦 5f と同じ音は B 弦 10f。4 弦なら端で止まっていた動きが 1 本伸びる。
+    await page.keyboard.press('Shift+ArrowDown')
+    const moved = await page
+      .locator('.tab-cell--note')
+      .evaluateAll((cells) =>
+        cells.map(
+          (cell) => (cell.getAttribute('aria-label') ?? '').match(/([GDAEB]) 弦$/)?.[1] + cell.textContent,
+        ),
+      )
+    expect(moved).toEqual(['B10'])
+
+    // その先は無い
+    await page.keyboard.press('Shift+ArrowDown')
+    expect(
+      await page
+        .locator('.tab-cell--note')
+        .evaluateAll((cells) =>
+          cells.map(
+            (cell) => (cell.getAttribute('aria-label') ?? '').match(/([GDAEB]) 弦$/)?.[1] + cell.textContent,
+          ),
+        ),
+    ).toEqual(['B10'])
+  })
+
+  test('旧形式 (v5) の保存データは 4 弦として読める', async ({ page }) => {
+    await openEditor(page)
+    await page.evaluate(() => {
+      localStorage.clear()
+      const score = {
+        title: 'v5 の譜面',
+        keyFifths: 0,
+        time: { beats: 4, beatType: 4 },
+        tempo: 120,
+        measures: [
+          [{ kind: 'note', notes: [{ string: 4, fret: 3 }], value: 4, dotted: false, triplet: false }],
+        ],
+      }
+      localStorage.setItem('bass-tabs:score:v5-id', JSON.stringify({ version: 5, score }))
+      localStorage.setItem(
+        'bass-tabs:index',
+        JSON.stringify({ version: 5, ids: ['v5-id'], currentId: 'v5-id' }),
+      )
+    })
+    await page.reload()
+    await page.locator('.tab-editor').waitFor()
+
+    await expect(page.locator('.score-row--current')).toContainText('v5 の譜面')
+    await expect(page.getByLabel('チューニング')).toHaveValue('four')
+    await expect(page.locator('.tab-cell--note')).toHaveText(['3'])
+  })
+})
+
 test.describe('小節をまたぐ入力', () => {
   const perBar = (page: Page) =>
     page
@@ -767,7 +892,7 @@ test.describe('編集の純関数', () => {
   const scoreOf = (
     measures: Entry[][],
     time: TimeSignature = { beats: 4, beatType: 4 },
-  ): Score => ({ title: '', keyFifths: 0, time, tempo: 160, measures })
+  ): Score => ({ title: '', keyFifths: 0, time, tempo: 160, tuning: 'four', measures })
 
   test('place は埋まった小節から次の空きへ流し、末尾では小節を増やす', () => {
     const full = [q(1), q(1), q(1), q(1)]

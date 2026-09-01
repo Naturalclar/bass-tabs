@@ -10,7 +10,7 @@ import {
   type NoteValue,
   type Score,
 } from './model.ts'
-import { MAX_FRET, STRINGS } from './tuning.ts'
+import { MAX_FRET, TUNINGS, type Tuning, type TuningName } from './tuning.ts'
 
 /**
  * Reads a tab-bearing MusicXML file back into the editor's model.
@@ -61,11 +61,11 @@ function tabStaffNumber(part: Element): string | null {
   return null
 }
 
-function fingeringOf(note: Element): Fingering | null {
+function fingeringOf(note: Element, tuning: TuningName): Fingering | null {
   const technical = note.querySelector('technical')
   const string = Number(text(technical, 'string'))
   const fret = Number(text(technical, 'fret'))
-  if (!STRINGS.some((entry) => entry.number === string)) return null
+  if (!TUNINGS[tuning].some((entry) => entry.number === string)) return null
   if (!Number.isInteger(fret) || fret < 0 || fret > MAX_FRET) return null
   return { string, fret }
 }
@@ -86,7 +86,40 @@ function tripletOf(note: Element): boolean | 'unsupported' {
   return 'unsupported'
 }
 
-function entryOf(note: Element): Entry | 'unsupported' | null {
+/**
+ * Which offered tuning the file declares. `<staff-lines>` alone would be
+ * enough to pick the lane count, but the open strings decide what the frets
+ * mean, so both must match a tuning we can actually hold -- anything else
+ * (a six-string, a drop tuning) is refused rather than read as if it were
+ * standard, which would put every note at the wrong pitch.
+ */
+function tuningOf(part: Element): TuningName | null {
+  const details = part.querySelector('staff-details')
+  const declared = details?.querySelectorAll('staff-tuning') ?? []
+  // Nothing declared: the file predates the question, and four strings is
+  // what this app wrote before it could ask.
+  if (declared.length === 0) return 'four'
+  const steps = [...declared]
+    .map((entry) => ({
+      line: Number(entry.getAttribute('line')),
+      step: text(entry, 'tuning-step'),
+      octave: Number(text(entry, 'tuning-octave')),
+    }))
+    .sort((a, b) => a.line - b.line)
+  for (const [name, candidate] of Object.entries(TUNINGS) as [TuningName, Tuning][]) {
+    if (candidate.length !== steps.length) continue
+    // `<staff-tuning line>` counts from the bottom, `<string>` from the top.
+    const expected = [...candidate].sort((a, b) => b.number - a.number)
+    const matches = expected.every(
+      (open, index) =>
+        open.step === steps[index]?.step && open.octave + 1 === steps[index]?.octave,
+    )
+    if (matches) return name
+  }
+  return null
+}
+
+function entryOf(note: Element, tuning: TuningName): Entry | 'unsupported' | null {
   const value = VALUE_BY_TYPE[text(note, 'type') ?? '']
   if (!value || !(NOTE_VALUES as readonly number[]).includes(value)) return null
   const dotted = note.querySelector('dot') !== null
@@ -95,7 +128,7 @@ function entryOf(note: Element): Entry | 'unsupported' | null {
 
   if (note.querySelector('rest')) return { kind: 'rest', value, dotted, triplet }
 
-  const fingering = fingeringOf(note)
+  const fingering = fingeringOf(note, tuning)
   return fingering === null ? null : { kind: 'note', notes: [fingering], value, dotted, triplet }
 }
 
@@ -113,6 +146,13 @@ export function fromMusicXml(xml: string): MusicXmlImport {
 
   const staff = tabStaffNumber(part)
   if (!staff) return { ok: false, reason: 'no-tab' }
+
+  // The file states its own instrument. Reading it rather than assuming four
+  // strings is what lets a five-string score survive a round trip, and what
+  // stops a five-string file from being read as a four-string one with an
+  // out-of-range string number on every low note.
+  const tuning = tuningOf(part)
+  if (tuning === null) return { ok: false, reason: 'unsupported' }
 
   const base = emptyScore()
   const beats = integer(part, 'time beats')
@@ -136,7 +176,7 @@ export function fromMusicXml(xml: string): MusicXmlImport {
       // file the model cannot spell, so it is refused, not half-kept.
       if (note.querySelector('chord')) {
         const previous = entries[entries.length - 1]
-        const fingering = fingeringOf(note)
+        const fingering = fingeringOf(note, tuning)
         if (tripletOf(note) === 'unsupported') return { ok: false, reason: 'unsupported' }
         if (!previous || previous.kind !== 'note' || fingering === null) {
           return { ok: false, reason: 'unsupported' }
@@ -147,7 +187,7 @@ export function fromMusicXml(xml: string): MusicXmlImport {
         previous.notes = sortedFingerings([...previous.notes, fingering])
         continue
       }
-      const entry = entryOf(note)
+      const entry = entryOf(note, tuning)
       if (entry === 'unsupported') return { ok: false, reason: 'unsupported' }
       if (entry) entries.push(entry)
     }
@@ -185,6 +225,7 @@ export function fromMusicXml(xml: string): MusicXmlImport {
       keyFifths: fifths ?? base.keyFifths,
       time,
       tempo,
+      tuning,
       measures,
     },
   }

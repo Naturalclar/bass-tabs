@@ -8,7 +8,7 @@ import {
   type NoteValue,
   type TimeSignature,
 } from '../editor/model.ts'
-import { MAX_FRET } from '../editor/tuning.ts'
+import { MAX_FRET, TUNING_LABELS, type TuningName } from '../editor/tuning.ts'
 
 import type { MidiStatus } from '../editor/useMidiInput.ts'
 
@@ -16,6 +16,7 @@ type Props = {
   title: string
   time: TimeSignature
   keyFifths: number
+  tuning: TuningName
   measureCount: number
   value: NoteValue
   dotted: boolean
@@ -31,6 +32,7 @@ type Props = {
   onTitle: (title: string) => void
   onTime: (time: TimeSignature) => void
   onKeyFifths: (fifths: number) => void
+  onTuning: (tuning: TuningName) => void
   onMeasureCount: (count: number) => void
   onValue: (value: NoteValue) => void
   onDotted: (dotted: boolean) => void
@@ -212,6 +214,22 @@ export function EditorPanel(props: Props) {
             {KEYS.map((key) => (
               <option key={key.fifths} value={key.fifths}>
                 {key.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="editor-field">
+          {/* Not just "弦": every lane button in the grid is named "… E 弦",
+              and a bare 弦 would be ambiguous to both a screen reader and the
+              e2e checks. */}
+          チューニング
+          <select
+            value={props.tuning}
+            onChange={(e) => props.onTuning(e.target.value as TuningName)}
+          >
+            {(Object.keys(TUNING_LABELS) as TuningName[]).map((name) => (
+              <option key={name} value={name}>
+                {TUNING_LABELS[name]}
               </option>
             ))}
           </select>

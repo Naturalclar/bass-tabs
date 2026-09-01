@@ -5,6 +5,8 @@
  * file, so the A4 layout and the print checks apply to it unchanged.
  */
 
+import type { TuningName } from './tuning.ts'
+
 /** Note values, named by their denominator: 4 is a quarter note. */
 export const NOTE_VALUES = [1, 2, 4, 8, 16] as const
 export type NoteValue = (typeof NOTE_VALUES)[number]
@@ -77,6 +79,12 @@ export type Score = {
    * printed on the page (♩=N) and written to the exported file.
    */
   tempo: number
+  /**
+   * Which bass this score is written for. Per score rather than per app: a
+   * library holds four- and five-string scores side by side, and an imported
+   * file keeps the tuning it declares. See `tuning.ts`.
+   */
+  tuning: TuningName
   measures: Entry[][]
 }
 
@@ -126,6 +134,7 @@ export function emptyScore(): Score {
     keyFifths: 0,
     time: { beats: 4, beatType: 4 },
     tempo: 160,
+    tuning: 'four',
     measures: [[], [], [], []],
   }
 }

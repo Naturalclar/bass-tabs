@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, type KeyboardEvent } from 'react'
 import { NOTE_VALUES, type NoteValue } from './model.ts'
-import { MAX_FRET, STRINGS } from './tuning.ts'
+import { MAX_FRET, TUNINGS } from './tuning.ts'
 import type { Cursor } from './edit.ts'
 import type { useEditor } from './useEditor.ts'
 
@@ -122,12 +122,16 @@ export function useEditorKeyboard(editor: Editor) {
             break
           }
           editor.moveNote({ strings: towardsHigherPitch ? -1 : 1 })
-          // `<string>` numbers count down from the highest-pitched string.
-          editor.setStringNumber(
-            towardsHigherPitch
-              ? Math.max(STRINGS[0].number, editor.stringNumber - 1)
-              : Math.min(STRINGS[STRINGS.length - 1].number, editor.stringNumber + 1),
-          )
+          // `<string>` numbers count down from the highest-pitched string, and
+          // how far down depends on the score's own tuning.
+          {
+            const strings = TUNINGS[editor.score.tuning]
+            editor.setStringNumber(
+              towardsHigherPitch
+                ? Math.max(strings[0].number, editor.stringNumber - 1)
+                : Math.min(strings[strings.length - 1].number, editor.stringNumber + 1),
+            )
+          }
           break
         }
         case 'ArrowLeft':
