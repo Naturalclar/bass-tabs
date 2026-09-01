@@ -190,6 +190,16 @@ onward, the newest filling in `triplet: false`) rather than being discarded. Pla
 remembered positions, and when leaving the editor (in video mode it would bleed into the
 capture).
 
+`src/editor/midiFile.ts` writes the score as a standard MIDI file. It takes the note list from
+`schedule()` rather than building its own, so sounding pitch, chords, triplets and the score's
+tuning are already decided by the time it runs. `DIVISIONS` being 24 is what makes this cheap:
+SMF's header division *is* ticks per quarter note, so every tick lands in the file unchanged.
+Two things it must keep doing — a note-off is written before a note-on at the same tick (a note
+ending exactly where the next begins is the common case, and the wrong order silences the new
+one), and two strings sounding one pitch collapse to a single note (the model allows E 5th fret
+with A open; one MIDI channel does not). Strings and frets do not survive: this is a one-way
+door, which is why importing `.mid` is a separate problem and not the inverse of this file.
+
 MusicXML's two numbering schemes run in opposite directions and are the easiest thing to break:
 `<string>` counts from the highest-pitched string (G is 1), `<staff-tuning line>` counts from the
 bottom staff line (the lowest string is 1). `tuning.ts` holds the conversion; don't inline the
