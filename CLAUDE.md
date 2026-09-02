@@ -185,10 +185,10 @@ tested without an AudioContext in `tests/playback.spec.ts`; the hook is the only
 Audio. Tempo lives on `Score` (`tempo`, quarter-note BPM whatever the meter): it is printed as
 ♩=N via `tempoXml()` in musicxml.ts, written to the exported file as `<sound tempo>`, read back
 by the importer, and changed through `commit()` (one `CommitKey`, so an adjustment is one undo
-step). `STORAGE_VERSION` is 5; older scores walk a chain of one-step lifts (`fromVersion2`
-onward, the newest filling in `triplet: false`) rather than being discarded. Playback stops when the open score changes, per the rule below about
-remembered positions, and when leaving the editor (in video mode it would bleed into the
-capture).
+step). The current `STORAGE_VERSION` lives in `storage.ts` and only there — this file stating a
+number has already gone stale twice, so it deliberately doesn't. Playback stops when the open
+score changes, per the rule below about remembered positions, and when leaving the editor (in
+video mode it would bleed into the capture).
 
 `src/editor/midiFile.ts` writes the score as a standard MIDI file. It takes the note list from
 `schedule()` rather than building its own, so sounding pitch, chords, triplets and the score's
