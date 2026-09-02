@@ -22,6 +22,15 @@ test('a score entered by clicking renders and prints as A4', async ({ page }) =>
   expect(size.height).toBeCloseTo(297, 0)
 })
 
+test('どこもクリックしていなくても数字キーで打てる', async ({ page }) => {
+  await openEditor(page)
+  // フォーカスはまだ body にある。エディタのキーは .tab-editor だけでなく
+  // window でも受けるので、開いてすぐ打ち始められる (文字入力欄の中だけは
+  // その欄のもの)。
+  await page.keyboard.press('3')
+  await expect(page.locator('.tab-cell--note')).toHaveText(['3'])
+})
+
 test('the keyboard writes frets, note values and rests', async ({ page }) => {
   await openEditor(page)
   await page.locator('.tab-editor').focus()

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { NOTE_VALUES, type NoteValue } from './model.ts'
 import { MAX_FRET, TUNINGS } from './tuning.ts'
 import type { Cursor } from './edit.ts'
@@ -8,6 +8,20 @@ type Editor = ReturnType<typeof useEditor>
 
 /** Keys that pick a note value, by the first letter of its English name. */
 const VALUE_KEYS: Record<string, NoteValue> = { w: 1, h: 2, q: 4, e: 8, s: 16 }
+
+/**
+ * The slice of a keyboard event the scheme reads. React's synthetic event and
+ * the window's native one both fit, so the same handler serves the editor div
+ * and the window-level fallback in App -- the fallback exists because the
+ * transport buttons sit outside `.tab-editor` and keep focus after a click.
+ */
+export type EditorKeyEvent = {
+  key: string
+  shiftKey: boolean
+  metaKey: boolean
+  ctrlKey: boolean
+  preventDefault(): void
+}
 
 /** How long consecutive digits are treated as one fret number, e.g. 1 then 2. */
 const FRET_KEY_WINDOW_MS = 800
@@ -66,7 +80,7 @@ export function useEditorKeyboard(editor: Editor) {
   }, [editor])
 
   const handleKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
+    (event: EditorKeyEvent) => {
       const key = event.key
       // Ctrl/Cmd combinations belong to the window-level undo handler. Shift
       // is not one of them: it selects the string variant of the arrow keys.
