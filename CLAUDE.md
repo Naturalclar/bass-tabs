@@ -163,6 +163,17 @@ no such duration, a note across a barline) keeps that screen on the all-eighths 
 tempo are deliberately not estimated: 4/4 stays, and `Score.tempo` is never written from a
 guess -- it is printed on paper as ♩=N, and a wrong guess would be printed too.
 
+`src/editor/audioImport.ts` is transcription (#76): an audio *file* becomes a score with no
+pixels involved -- onsets say when, `pitchAt` (YIN over the same PCM, in audio.ts) says which
+note, `positionFor` turns the pitch into the lowest playable fret, and the #75 grid supplies
+the lengths when it can. Monophonic bass recordings only: polyphonic pitch is a different
+problem and source separation is #61's. YIN reads the period from the waveform rather than
+the spectrum's peak because a bass fundamental is often weaker than its harmonics -- the
+octave error that would cause is pinned by a dedicated test. An onset whose pitch cannot be
+read (or falls outside the tuning) becomes a rest and is counted, same as unreadable OCR
+glyphs. `decodeMonoSamples` lives here and VideoImport shares it -- a webm's audio track and
+an mp3 are the same thing to `decodeAudioData`.
+
 `src/editor/storage.ts` owns the saved scores: one key per score plus an index naming them and
 remembering which was open. Per-score keys are what let an edit write only the score being edited —
 the app saves on every keystroke, and rewriting the whole library that often would get slower with

@@ -61,6 +61,94 @@ export function onsetTimes(samples: Float32Array, sampleRate: number): number[] 
   return times
 }
 
+/** ピッチ探索の範囲 (Hz)。5 弦の低い B (30.9Hz) から G 弦 24 フレットまで。 */
+const PITCH_MIN_HZ = 28
+const PITCH_MAX_HZ = 450
+
+/** 解析窓。最低音でも 2 周期以上入る長さが要る (30.9Hz の周期は 32ms)。 */
+const PITCH_WINDOW_SECONDS = 0.1
+
+/** 発音直後はアタックの雑音なので、少し過ぎてから測る。 */
+const ATTACK_SKIP_SECONDS = 0.03
+
+/** CMNDF がこれを下回る谷が無ければ「音程あり」と言わない。 */
+const VOICED_THRESHOLD = 0.3
+
+/**
+ * この発音のピッチを MIDI ノート番号で返す。取れなければ null -- 休符に
+ * して件数を出すのは呼び出し側 (画像取り込みの「読めなかったものは休符」
+ * と同じ分業)。
+ *
+ * 中身は YIN (自己相関の改良): 差分関数の累積平均正規化 (CMNDF) の谷を、
+ * 周期の短い側から「十分深い最初の谷」として拾う。ベースは基音が倍音より
+ * 弱いことが多く (#76)、スペクトルの最大値を取るとオクターブ上に誤るが、
+ * 波形の周期性そのものは基音の周期で残るので、時間領域の谷は騙されにくい。
+ * それでも「最初の」谷を優先するのは、倍音だけ強い音で 2 倍周期 (1 オク
+ * ターブ下) の谷も同程度に深くなるため -- 短い周期側から見れば真の周期に
+ * 先に出会う。
+ */
+export function pitchAt(samples: Float32Array, sampleRate: number, at: number): number | null {
+  const lagMin = Math.floor(sampleRate / PITCH_MAX_HZ)
+  const lagMax = Math.ceil(sampleRate / PITCH_MIN_HZ)
+  const window = Math.round(PITCH_WINDOW_SECONDS * sampleRate)
+  let start = Math.round((at + ATTACK_SKIP_SECONDS) * sampleRate)
+  // 音が尻切れなら窓を左へ寄せる。それでも足りなければ測れない。
+  start = Math.min(start, samples.length - window - lagMax)
+  if (start < 0) return null
+
+  const difference = new Float64Array(lagMax + 1)
+  for (let lag = 1; lag <= lagMax; lag++) {
+    let sum = 0
+    for (let i = 0; i < window; i++) {
+      const delta = samples[start + i] - samples[start + i + lag]
+      sum += delta * delta
+    }
+    difference[lag] = sum
+  }
+
+  const cmndf = new Float64Array(lagMax + 1)
+  cmndf[0] = 1
+  let running = 0
+  for (let lag = 1; lag <= lagMax; lag++) {
+    running += difference[lag]
+    cmndf[lag] = running === 0 ? 1 : (difference[lag] * lag) / running
+  }
+
+  // 十分深い最初の谷。無ければ最深の谷で妥協し、それでも浅ければ音程なし。
+  let lag = -1
+  for (let candidate = lagMin; candidate <= lagMax; candidate++) {
+    if (cmndf[candidate] < 0.15) {
+      while (candidate + 1 <= lagMax && cmndf[candidate + 1] < cmndf[candidate]) candidate++
+      lag = candidate
+      break
+    }
+  }
+  if (lag === -1) {
+    let deepest = Infinity
+    for (let candidate = lagMin; candidate <= lagMax; candidate++) {
+      if (cmndf[candidate] < deepest) {
+        deepest = cmndf[candidate]
+        lag = candidate
+      }
+    }
+    if (deepest > VOICED_THRESHOLD) return null
+  }
+
+  // 放物線補間で周期をサンプル未満まで詰める。半音は 6% 差なので、低音では
+  // 整数ラグだけだと丸めで隣の音に落ちる。
+  let period = lag
+  if (lag > 1 && lag < lagMax) {
+    const left = cmndf[lag - 1]
+    const centre = cmndf[lag]
+    const right = cmndf[lag + 1]
+    const denominator = left + right - 2 * centre
+    if (denominator !== 0) period = lag + (left - right) / (2 * denominator)
+  }
+
+  const frequency = sampleRate / period
+  return Math.round(69 + 12 * Math.log2(frequency / 440))
+}
+
 /**
  * オンセット列から推定した格子。`unit` 秒ごとの目盛が `phase` から始まり、
  * 1 目盛は `unitTicks` (DIVISIONS 基準: 16 分 = 6, 8 分 = 12, 4 分 = 24)。

@@ -127,7 +127,8 @@ function cropForOcr(
 }
 
 /** Entries laid into bars, growing a bar whenever the next entry won't fit. */
-function intoMeasures(entries: Entry[], score: Omit<Score, 'measures'>): Entry[][] {
+/** Packs a flat run of entries into measures, flowing at each barline. */
+export function intoMeasures(entries: Entry[], score: Omit<Score, 'measures'>): Entry[][] {
   const measures: Entry[][] = [[]]
   for (const entry of entries) {
     const current = measures[measures.length - 1]

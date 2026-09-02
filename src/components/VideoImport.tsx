@@ -3,6 +3,7 @@ import { readTabEntries } from '../editor/imageImport.ts'
 import { analyzeTabImage } from '../editor/tabImage.ts'
 import { signatureOf, sameScreen, type ScreenSignature } from '../editor/videoScan.ts'
 import { estimateGrid, onsetTimes } from '../editor/audio.ts'
+import { decodeMonoSamples } from '../editor/audioImport.ts'
 import { noteDurations } from '../editor/quantize.ts'
 import type { Entry, TimeSignature } from '../editor/model.ts'
 import { videoIdOf } from '../editor/videoLink.ts'
@@ -53,17 +54,7 @@ async function monoSamples(
   url: string,
 ): Promise<{ samples: Float32Array; sampleRate: number } | null> {
   try {
-    const data = await (await fetch(url)).arrayBuffer()
-    const context = new OfflineAudioContext(1, 1, 44100)
-    const decoded = await context.decodeAudioData(data)
-    const samples = new Float32Array(decoded.length)
-    for (let channel = 0; channel < decoded.numberOfChannels; channel++) {
-      const channelData = decoded.getChannelData(channel)
-      for (let i = 0; i < channelData.length; i++) {
-        samples[i] += channelData[i] / decoded.numberOfChannels
-      }
-    }
-    return { samples, sampleRate: decoded.sampleRate }
+    return await decodeMonoSamples(await (await fetch(url)).arrayBuffer())
   } catch {
     return null
   }
