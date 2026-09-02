@@ -33,7 +33,7 @@ passing is not the same as CI passing — the build and the print checks are not
 
 The only tests are the Playwright specs in `tests/` — `print.spec.ts` for imported files, and
 one spec per editor area for scores written in the app (`editor-input`, `library`,
-`import-export`, `midi`, `image-import`, `video-import`, `playback`, `appearance`, sharing
+`import-export`, `midi`, `image-import`, `video-import`, `audio`, `playback`, `appearance`, sharing
 `tests/helpers.ts`), plus `bundle.spec.ts` for what the first load is allowed to carry; there are no unit tests. `pnpm test:print` runs them all — it builds and
 serves the app itself, so it needs no running dev server.
 
@@ -151,6 +151,17 @@ films this very tab and staff lines on screen read as false string lines. The OC
 module-level singleton so repeated captures do not re-download megabytes. Tests stub
 `getDisplayMedia` with a canvas `captureStream()` -- the permission prompt is the only part the
 real path has that the tests do not.
+
+`src/editor/audio.ts` + `quantize.ts` are the rhythm side of the file scan (#75): pixels say
+which notes, the file's own audio track says how long. Both are pure functions over numbers
+(no Web Audio -- decoding is the caller's, same split as `playback.ts`/`usePlayback.ts`), tested
+against synthesized PCM in `tests/audio.spec.ts`. The policy everywhere is refuse-don't-round:
+one grid is estimated for the whole file, a screen gets note values only when its display
+window holds exactly one onset per note, and any result the model cannot spell (off-grid,
+no such duration, a note across a barline) keeps that screen on the all-eighths import.
+"Plausible-looking wrong rhythm" is the failure mode this is built to never produce. Meter and
+tempo are deliberately not estimated: 4/4 stays, and `Score.tempo` is never written from a
+guess -- it is printed on paper as ♩=N, and a wrong guess would be printed too.
 
 `src/editor/storage.ts` owns the saved scores: one key per score plus an index naming them and
 remembering which was open. Per-score keys are what let an edit write only the score being edited —

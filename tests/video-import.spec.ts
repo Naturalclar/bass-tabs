@@ -71,10 +71,16 @@ test.describe('動画からの取り込み', () => {
         ),
       )
 
-/** Records a webm in-page: two different tab screens, ~1.6s each. */
-async function makeVideoFile(page: Page, path: string) {
+/**
+ * Records a webm in-page: two different tab screens, ~1.6s each. With
+ * `withAudio`, beeps land on a 0.3-second grid (♩=100 の 8 分格子) so the
+ * rhythm has a knowable right answer: screen A at 0.1 / 0.7 / 1.0 (♩ ♪ ♪),
+ * screen B at 2.2 / 2.8 (♩ ♩). Without it the file has no audio track at
+ * all, which is what keeps the all-eighths fallback honest.
+ */
+async function makeVideoFile(page: Page, path: string, withAudio = false) {
   await page.setContent('<body></body>')
-  const b64: string = await page.evaluate(async () => {
+  const b64: string = await page.evaluate(async (audio: boolean) => {
     const canvas = document.createElement('canvas')
     canvas.width = 720
     canvas.height = 220
@@ -107,7 +113,27 @@ async function makeVideoFile(page: Page, path: string) {
       { lane: 3, x: 300, text: '7' },
     ]
     const stream = canvas.captureStream(10)
-    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' })
+    let audioContext: AudioContext | null = null
+    if (audio) {
+      audioContext = new AudioContext()
+      await audioContext.resume()
+      const destination = audioContext.createMediaStreamDestination()
+      const base = audioContext.currentTime + 0.05
+      for (const at of [0.1, 0.7, 1.0, 2.2, 2.8]) {
+        const oscillator = audioContext.createOscillator()
+        oscillator.frequency.value = 220
+        const gain = audioContext.createGain()
+        gain.gain.setValueAtTime(0.8, base + at)
+        gain.gain.exponentialRampToValueAtTime(0.001, base + at + 0.25)
+        oscillator.connect(gain).connect(destination)
+        oscillator.start(base + at)
+        oscillator.stop(base + at + 0.3)
+      }
+      stream.addTrack(destination.stream.getAudioTracks()[0])
+    }
+    const recorder = new MediaRecorder(stream, {
+      mimeType: audio ? 'video/webm;codecs=vp8,opus' : 'video/webm;codecs=vp8',
+    })
     const chunks: Blob[] = []
     recorder.ondataavailable = (e) => chunks.push(e.data)
     const doneRecording = new Promise<void>((resolve) => {
@@ -127,13 +153,14 @@ async function makeVideoFile(page: Page, path: string) {
     })
     recorder.stop()
     await doneRecording
+    await audioContext?.close()
     const blob = new Blob(chunks, { type: 'video/webm' })
     const buffer = await blob.arrayBuffer()
     let binary = ''
     const bytes = new Uint8Array(buffer)
     for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
     return btoa(binary)
-  })
+  }, withAudio)
   writeFileSync(path, Buffer.from(b64, 'base64'))
 }
 
@@ -176,9 +203,53 @@ async function makeVideoFile(page: Page, path: string) {
     // Two screens, five notes -- each screen once, despite being sampled
     // several times, and in the order they appear in the video.
     await expect(page.locator('.video-import__notice')).toContainText('2 画面から 5 音')
+    // No audio track in this fixture, so the honest fallback holds: no
+    // rhythm is guessed and everything stays an eighth note.
+    await expect(page.locator('.video-import__notice')).toContainText('音価はエディタで直してください')
 
     await page.getByRole('button', { name: '譜面を作る' }).click()
     expect(await gridNotes(page)).toEqual(['E3', 'A5', 'D0', 'G12', 'E7'])
+    // slice: 埋まりきらない小節は末尾に追加スロット (+) を出す
+    const values = await page.locator('.tab-column__value').allTextContents()
+    expect(values.slice(0, 5)).toEqual(['♪', '♪', '♪', '♪', '♪'])
+  })
+
+  /**
+   * #75: the file's audio decides the note values. One grid is estimated
+   * for the whole file; per screen, the onsets inside its display window
+   * stand in for its notes, and the counts agree here -- so both screens
+   * get their rhythm instead of the all-eighths default.
+   */
+  test('走査は音の長さを音声から推定する', async ({ page }) => {
+    test.setTimeout(180_000)
+    const file = join(mkdtempSync(join(tmpdir(), 'bass-tabs-vid-')), 'tab.webm')
+    await makeVideoFile(page, file, true)
+
+    await page.goto(BASE_PATH)
+    await page.locator('.tab-editor').waitFor()
+    await page.getByRole('button', { name: '動画から取り込む' }).click()
+    await page.locator('.video-import input[type="file"]').setInputFiles(file)
+    await page.locator('video.video-import__player').waitFor()
+
+    await page.getByRole('button', { name: '動画を走査して全部読み取る' }).click()
+    await page.waitForFunction(
+      () => {
+        const text = document.querySelector('.video-import__notice')?.textContent ?? ''
+        return text.includes('取り込みました') || text.includes('見つかりませんでした')
+      },
+      undefined,
+      { timeout: 150_000 },
+    )
+    await expect(page.locator('.video-import__notice')).toContainText('2 画面から 5 音')
+    await expect(page.locator('.video-import__notice')).toContainText('音の長さは音声から推定しました')
+
+    await page.getByRole('button', { name: '譜面を作る' }).click()
+    // The frets come from the pixels, the lengths from the beeps: screen A
+    // is ♩ ♪ ♪ (the last note inherits the gap before it), screen B ♩ ♩.
+    expect(await gridNotes(page)).toEqual(['E3', 'A5', 'D0', 'G12', 'E7'])
+    expect(await page.locator('.tab-column__value').allTextContents()).toEqual([
+      '♩', '♪', '♪', '♩', '♩',
+    ])
   })
 
   test('動画ファイルでは共有なしで「今の画面」を読める', async ({ page }) => {

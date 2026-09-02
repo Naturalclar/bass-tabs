@@ -152,7 +152,7 @@ export default function App() {
           />
           {mode === 'video' ? (
             <div className="workspace__main">
-              <VideoImport onAppend={editor.appendEntries} />
+              <VideoImport onAppend={editor.appendEntries} time={editor.score.time} />
             </div>
           ) : (
             <div className="workspace__main">

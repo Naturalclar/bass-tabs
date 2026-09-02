@@ -2,12 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { readTabEntries } from '../editor/imageImport.ts'
 import { analyzeTabImage } from '../editor/tabImage.ts'
 import { signatureOf, sameScreen, type ScreenSignature } from '../editor/videoScan.ts'
-import type { Entry } from '../editor/model.ts'
+import { estimateGrid, onsetTimes } from '../editor/audio.ts'
+import { noteDurations } from '../editor/quantize.ts'
+import type { Entry, TimeSignature } from '../editor/model.ts'
 import { videoIdOf } from '../editor/videoLink.ts'
 
 type Props = {
   /** Appends recognised entries to the open score; returns what actually fit. */
   onAppend: (entries: Entry[]) => { added: number; dropped: number }
+  /** The open score's meter -- the quantiser needs it for the barline check. */
+  time: TimeSignature
 }
 
 /**
@@ -39,6 +43,32 @@ function frameOf(
   return context.getImageData(0, 0, area.w, area.h)
 }
 
+/**
+ * The file's audio track as mono PCM. The `<video>` is muted, but that is
+ * about playback -- the track is in the file, and this is what #75 reads the
+ * rhythm from. Null when the file has no audio or cannot be decoded; the
+ * scan then keeps its all-eighths behaviour.
+ */
+async function monoSamples(
+  url: string,
+): Promise<{ samples: Float32Array; sampleRate: number } | null> {
+  try {
+    const data = await (await fetch(url)).arrayBuffer()
+    const context = new OfflineAudioContext(1, 1, 44100)
+    const decoded = await context.decodeAudioData(data)
+    const samples = new Float32Array(decoded.length)
+    for (let channel = 0; channel < decoded.numberOfChannels; channel++) {
+      const channelData = decoded.getChannelData(channel)
+      for (let i = 0; i < channelData.length; i++) {
+        samples[i] += channelData[i] / decoded.numberOfChannels
+      }
+    }
+    return { samples, sampleRate: decoded.sampleRate }
+  } catch {
+    return null
+  }
+}
+
 /** Resolves once the video sits on the requested time. */
 function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
   return new Promise((resolve) => {
@@ -67,7 +97,7 @@ async function resolvedDuration(video: HTMLVideoElement): Promise<number> {
   return video.duration
 }
 
-export function VideoImport({ onAppend }: Props) {
+export function VideoImport({ onAppend, time }: Props) {
   const [link, setLink] = useState('')
   const [videoId, setVideoId] = useState<string | null>(null)
   const [sharing, setSharing] = useState(false)
@@ -223,6 +253,17 @@ export function VideoImport({ onAppend }: Props) {
    * of tab exactly once. A screen is read on its *second* consecutive
    * sighting: one frame alone can be mid-transition, and reading garbage
    * once would append garbage once.
+   *
+   * #75: the file's audio decides the note values, where it can. One grid
+   * for the whole file, decoded up front; per screen, the onsets inside its
+   * display window stand in for its notes -- but only when the counts agree
+   * and every glyph was read (an unread rest has no onset to pair with).
+   * Anything else keeps the all-eighths import, the honest fallback. A
+   * screen's window only closes when the next screen appears, so a read
+   * screen is held back one step and appended then -- still one commit per
+   * screen, and never two commits in the same tick (the second would read
+   * the score as it was before the first; the onAppendRef comment above is
+   * about exactly this).
    */
   const handleScan = useCallback(async () => {
     const video = fileVideoRef.current
@@ -235,9 +276,12 @@ export function VideoImport({ onAppend }: Props) {
     const STEP = 0.5
     let lastAppended: ScreenSignature | null = null
     let pending: ScreenSignature | null = null
+    let pendingSeenAt = 0
+    let held: { entries: Entry[]; unread: number; seenAt: number } | null = null
     let screens = 0
     let notes = 0
     let unread = 0
+    let timed = 0
     try {
       video.pause()
       const duration = await resolvedDuration(video)
@@ -245,10 +289,35 @@ export function VideoImport({ onAppend }: Props) {
         setNotice('この動画の長さが分からず、走査できませんでした')
         return
       }
-      for (let time = 0; time < duration && !abortScan.current; time += STEP) {
-        await seekTo(video, Math.min(time, duration - 0.01))
+
+      const audio = await monoSamples(fileUrl ?? video.src)
+      const onsets = audio ? onsetTimes(audio.samples, audio.sampleRate) : []
+      const grid = estimateGrid(onsets)
+
+      const flush = (windowEnd: number) => {
+        if (!held) return
+        const screen = held
+        held = null
+        let entries = screen.entries
+        if (grid && screen.unread === 0 && entries.every((entry) => entry.kind === 'note')) {
+          const inWindow = onsets.filter((t) => t >= screen.seenAt && t <= windowEnd)
+          const durations =
+            inWindow.length === entries.length ? noteDurations(inWindow, grid, time) : null
+          if (durations) {
+            entries = entries.map((entry, index) => ({ ...entry, ...durations[index] }))
+            timed++
+          }
+        }
+        const { added } = onAppendRef.current(entries)
+        screens++
+        notes += added
+        unread += screen.unread
+      }
+
+      for (let at = 0; at < duration && !abortScan.current; at += STEP) {
+        await seekTo(video, Math.min(at, duration - 0.01))
         setNotice(
-          `走査中… ${time.toFixed(1)} / ${duration.toFixed(1)} 秒（${screens} 画面 ${notes} 音）`,
+          `走査中… ${at.toFixed(1)} / ${duration.toFixed(1)} 秒（${screens} 画面 ${notes} 音）`,
         )
         const frame = frameOf(video)
         const analysis = analyzeTabImage(frame)
@@ -264,29 +333,36 @@ export function VideoImport({ onAppend }: Props) {
         if (pending && sameScreen(signature, pending)) {
           const result = await readTabEntries(frame)
           if (result.ok && result.entries.length > 0) {
-            const { added } = onAppendRef.current(result.entries)
-            screens++
-            notes += added
-            unread += result.unread
+            flush(pendingSeenAt)
+            held = { entries: result.entries, unread: result.unread, seenAt: pendingSeenAt }
           }
           lastAppended = signature
           pending = null
         } else {
           pending = signature
+          pendingSeenAt = at
         }
       }
+      flush(duration)
+
       const parts =
         screens > 0
           ? [`${screens} 画面から ${notes} 音を取り込みました`]
           : ['タブ譜の画面が見つかりませんでした']
       if (unread > 0) parts.push(`${unread} 箇所は読めず休符`)
       if (abortScan.current) parts.push('途中で停止しました')
-      parts.push('音価はエディタで直してください')
+      if (timed === screens && timed > 0) {
+        parts.push('音の長さは音声から推定しました。外れていたらエディタで直してください')
+      } else if (timed > 0) {
+        parts.push(`音の長さは ${timed} 画面ぶんだけ音声から推定しました。残りはエディタで直してください`)
+      } else if (screens > 0) {
+        parts.push('音価はエディタで直してください')
+      }
       setNotice(parts.join('。'))
     } finally {
       setScanning(false)
     }
-  }, [])
+  }, [fileUrl, time])
 
   return (
     <section className="video-import">
