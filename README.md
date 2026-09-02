@@ -277,6 +277,7 @@ oxlint は `--deny-warnings` で動かしている。既定では警告があっ
 ## 印刷リグレッションチェック
 
 ```sh
+pnpm exec playwright install chromium   # 初回のみ
 pnpm test:print
 ```
 
