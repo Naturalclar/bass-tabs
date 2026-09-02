@@ -9,10 +9,14 @@ import type { MidiStatus } from '../editor/useMidiInput.ts'
 
 type Props = {
   playing: boolean
+  paused: boolean
   canPlay: boolean
+  /** Whether the cursor is already at the top, which is all stop leaves to do. */
+  atStart: boolean
   tempo: number
   midi: MidiStatus
   onTogglePlay: () => void
+  onStop: () => void
   onTempo: (tempo: number) => void
   onConnectMidi: () => void
   onExport: () => void
@@ -71,14 +75,16 @@ function TempoField({ tempo, onTempo }: { tempo: number; onTempo: (tempo: number
 export function Transport(props: Props) {
   return (
     <div className="editor-row">
-      {/* Proofing playback: one run from the top, to hear whether the
-          entered notes are right before printing them. No cursor, no loop. */}
+      {/* Two buttons, not one toggle with three faces. Play/pause is the one
+          you press repeatedly while working through a passage; stop is the
+          one that puts you back at the top, and having to pass through it to
+          resume was the reason a pause was wanted at all. */}
       <button
         type="button"
         className="button"
         aria-pressed={props.playing}
-        aria-label={props.playing ? '停止' : '再生'}
-        title={props.playing ? '停止' : '再生'}
+        aria-label={props.playing ? '一時停止' : props.paused ? '続きから再生' : '再生'}
+        title={props.playing ? '一時停止' : props.paused ? '続きから再生' : '再生'}
         onClick={props.onTogglePlay}
         disabled={!props.playing && !props.canPlay}
       >
@@ -86,13 +92,28 @@ export function Transport(props: Props) {
             dark-scheme test measures for text; an emoji would not be. */}
         {props.playing ? (
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-            <rect x="1" y="1" width="10" height="10" fill="currentColor" />
+            <rect x="1.5" y="1" width="3" height="10" fill="currentColor" />
+            <rect x="7.5" y="1" width="3" height="10" fill="currentColor" />
           </svg>
         ) : (
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
             <path d="M2 1 L11 6 L2 11 Z" fill="currentColor" />
           </svg>
         )}
+      </button>
+      {/* Enabled only when it has something to undo: a run in progress, a
+          pause held, or a cursor left somewhere other than the top. */}
+      <button
+        type="button"
+        className="button"
+        aria-label="停止"
+        title="停止"
+        onClick={props.onStop}
+        disabled={!props.playing && !props.paused && props.atStart}
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+          <rect x="1" y="1" width="10" height="10" fill="currentColor" />
+        </svg>
       </button>
       <TempoField tempo={props.tempo} onTempo={props.onTempo} />
       <button

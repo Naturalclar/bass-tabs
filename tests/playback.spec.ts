@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { columnAt, schedule, secondsPerTick, ticksAt } from '../src/editor/playback.ts'
@@ -284,13 +284,13 @@ test.describe('追従と頭出し', () => {
     await page.getByLabel('BPM').fill('30')
 
     await page.getByRole('button', { name: '2 小節目から再生' }).click()
-    await expect(page.getByRole('button', { name: '停止' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '一時停止' })).toBeVisible()
 
     // 光るのは 2 小節目の列: 頭出しが効いていて、1 小節目は飛ばされた
     await expect(page.locator('.tab-measure').nth(1).locator('.tab-column--playing')).toHaveCount(1)
     await expect(page.locator('.tab-measure').nth(0).locator('.tab-column--playing')).toHaveCount(0)
 
-    await page.getByRole('button', { name: '停止' }).click()
+    await page.getByRole('button', { name: '停止', exact: true }).click()
     await expect(page.locator('.tab-column--playing')).toHaveCount(0)
   })
 
@@ -314,7 +314,7 @@ test.describe('追従と頭出し', () => {
       .poll(playingIndex, { timeout: 3000 })
       .toBeGreaterThan(0)
 
-    await page.getByRole('button', { name: '停止' }).click()
+    await page.getByRole('button', { name: '停止', exact: true }).click()
   })
 
   test('再生中に別の小節番号を押すとそこへ跳ぶ', async ({ page }) => {
@@ -330,7 +330,7 @@ test.describe('追従と頭出し', () => {
     await expect(page.locator('.tab-measure').nth(1).locator('.tab-column--playing')).toHaveCount(1)
     await expect(page.locator('.tab-measure').nth(0).locator('.tab-column--playing')).toHaveCount(0)
 
-    await page.getByRole('button', { name: '停止' }).click()
+    await page.getByRole('button', { name: '停止', exact: true }).click()
   })
 })
 
@@ -346,10 +346,9 @@ test.describe('再生', () => {
     // 遅くして、検査が押すより先に再生が終わってしまわないようにする
     await page.getByLabel('BPM').fill('30')
     await play.click()
-    const stop = page.getByRole('button', { name: '停止' })
-    await expect(stop).toBeVisible()
+    await expect(page.getByRole('button', { name: '一時停止' })).toBeVisible()
 
-    await stop.click()
+    await page.getByRole('button', { name: '停止', exact: true }).click()
     await expect(page.getByRole('button', { name: '再生', exact: true })).toBeEnabled()
   })
 
@@ -358,7 +357,7 @@ test.describe('再生', () => {
     await fillFirstMeasure(page, 'E')
     await page.getByLabel('BPM').fill('30')
     await page.getByRole('button', { name: '再生', exact: true }).click()
-    await expect(page.getByRole('button', { name: '停止' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '一時停止' })).toBeVisible()
 
     await page.getByRole('button', { name: '＋ 追加' }).click()
 
@@ -366,5 +365,87 @@ test.describe('再生', () => {
     const play = page.getByRole('button', { name: '再生', exact: true })
     await expect(play).toBeVisible()
     await expect(play).toBeDisabled()
+  })
+})
+
+/**
+ * 再生ボタンは再生／一時停止のトグルで、停止は別のボタン (#95)。止めたら
+ * 必ず頭からやり直し、では途中を繰り返し聞けないというのが発端なので、
+ * 「続きから鳴る」ことと「停止は先頭に戻す」ことの両方をここで固定する。
+ */
+test.describe('一時停止と停止', () => {
+  /** いま光っている列の番号。どこも光っていなければ -1。 */
+  function playingIndex(page: Page, measure: number) {
+    return page
+      .locator('.tab-measure')
+      .nth(measure)
+      .locator('.tab-column')
+      .evaluateAll((columns) =>
+        columns.findIndex((column) => column.classList.contains('tab-column--playing')),
+      )
+  }
+
+  test('一時停止すると光ったままで、続きから鳴る', async ({ page }) => {
+    await openEditor(page)
+    await fillFirstMeasure(page, 'E')
+    // 30 BPM の 4 分音符 = 1 拍 2 秒。先へ進むのを待つ間も、検査が押す前に
+    // 曲が終わってしまわない長さ。
+    await page.getByLabel('BPM').fill('30')
+
+    await page.getByRole('button', { name: '再生', exact: true }).click()
+    await expect.poll(() => playingIndex(page, 0), { timeout: 5000 }).toBeGreaterThan(0)
+
+    await page.getByRole('button', { name: '一時停止' }).click()
+    // 音は止まるが位置は残る: ハイライトは消えず、再生ボタンは続きを申し出る
+    const resume = page.getByRole('button', { name: '続きから再生' })
+    await expect(resume).toBeVisible()
+    const paused = await playingIndex(page, 0)
+    expect(paused).toBeGreaterThan(0)
+    await expect.poll(() => playingIndex(page, 0)).toBe(paused)
+
+    await resume.click()
+    await expect(page.getByRole('button', { name: '一時停止' })).toBeVisible()
+    // 頭に戻っていない -- 止めた列か、その先
+    expect(await playingIndex(page, 0)).toBeGreaterThanOrEqual(paused)
+
+    await page.getByRole('button', { name: '停止', exact: true }).click()
+  })
+
+  test('停止するとカーソルが先頭に戻り、次の再生は頭から', async ({ page }) => {
+    await openEditor(page)
+    await fillFirstMeasure(page, 'E')
+    await page.getByLabel('BPM').fill('30')
+    // 1 小節を埋めたので、カーソルは先頭ではなく最後に置いた列にいる
+    await expect(
+      page.locator('.tab-measure').first().locator('.tab-column').first(),
+    ).not.toHaveClass(/tab-column--selected/)
+
+    await page.getByRole('button', { name: '再生', exact: true }).click()
+    await expect.poll(() => playingIndex(page, 0), { timeout: 5000 }).toBeGreaterThan(0)
+    await page.getByRole('button', { name: '一時停止' }).click()
+
+    await page.getByRole('button', { name: '停止', exact: true }).click()
+    // 音も一時停止も消え、カーソルは 1 小節目の頭
+    await expect(page.locator('.tab-column--playing')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '再生', exact: true })).toBeVisible()
+    const selected = page.locator('.tab-measure').first().locator('.tab-column').first()
+    await expect(selected).toHaveClass(/tab-column--selected/)
+
+    // 続きではなく頭から: 押した直後に光るのは 1 列目
+    await page.getByRole('button', { name: '再生', exact: true }).click()
+    expect(await playingIndex(page, 0)).toBe(0)
+    await page.getByRole('button', { name: '停止', exact: true }).click()
+  })
+
+  test('鳴っておらず先頭にいるなら停止は押せない', async ({ page }) => {
+    await openEditor(page)
+    const stop = page.getByRole('button', { name: '停止', exact: true })
+    await expect(stop).toBeDisabled()
+
+    // カーソルが動けば、戻す先があるので押せるようになる
+    await fillFirstMeasure(page, 'E')
+    await expect(stop).toBeEnabled()
+    await stop.click()
+    await expect(stop).toBeDisabled()
   })
 })

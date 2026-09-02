@@ -35,10 +35,13 @@ type Props = {
   remaining: number
   midi: MidiStatus
   playing: boolean
+  paused: boolean
   canPlay: boolean
+  atStart: boolean
   tempo: number
   onTempo: (tempo: number) => void
   onTogglePlay: () => void
+  onStop: () => void
   onTitle: (title: string) => void
   onTime: (time: TimeSignature) => void
   onKeyFifths: (fifths: number) => void
@@ -96,10 +99,13 @@ export function EditorPanel(props: Props) {
 
       <Transport
         playing={props.playing}
+        paused={props.paused}
         canPlay={props.canPlay}
+        atStart={props.atStart}
         tempo={props.tempo}
         midi={props.midi}
         onTogglePlay={props.onTogglePlay}
+        onStop={props.onStop}
         onTempo={props.onTempo}
         onConnectMidi={props.onConnectMidi}
         onExport={props.onExport}
