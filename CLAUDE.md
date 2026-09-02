@@ -33,7 +33,7 @@ passing is not the same as CI passing — the build and the print checks are not
 
 The only tests are the Playwright specs in `tests/` — `print.spec.ts` for imported files, and
 one spec per editor area for scores written in the app (`editor-input`, `library`,
-`import-export`, `image-import`, `video-import`, `playback`, `appearance`, sharing
+`import-export`, `midi`, `image-import`, `video-import`, `playback`, `appearance`, sharing
 `tests/helpers.ts`), plus `bundle.spec.ts` for what the first load is allowed to carry; there are no unit tests. `pnpm test:print` runs them all — it builds and
 serves the app itself, so it needs no running dev server.
 
