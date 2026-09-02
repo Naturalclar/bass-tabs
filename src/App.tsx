@@ -112,6 +112,14 @@ export default function App() {
     [],
   )
 
+  // Stop is "start over": silence the run, drop any pause, and put the cursor
+  // back at the top so the next play -- and the next keystroke -- begin where
+  // the last run did.
+  const handleStop = useCallback(() => {
+    playback.stop()
+    editor.resetCursor()
+  }, [editor, playback])
+
   const handleExportAll = useCallback(() => {
     download(toBackup(editor.scores), 'bass-tabs-library.json', 'application/json')
   }, [download, editor.scores])
@@ -170,10 +178,13 @@ export default function App() {
                 remaining={editor.remaining}
                 midi={midi.status}
                 playing={playback.playing}
+                paused={playback.paused}
                 canPlay={playback.canPlay}
+                atStart={editor.cursor.measure === 0 && editor.cursor.index === 0}
                 tempo={editor.score.tempo}
                 onTempo={editor.setTempo}
-                onTogglePlay={playback.playing ? playback.stop : playback.play}
+                onTogglePlay={playback.playing ? playback.pause : playback.play}
+                onStop={handleStop}
                 onTitle={editor.setTitle}
                 onTime={editor.setTime}
                 onKeyFifths={editor.setKeyFifths}

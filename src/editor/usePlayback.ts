@@ -15,15 +15,18 @@ function frequency(midi: number): number {
 const LEAD_SECONDS = 0.05
 
 /**
- * Sounding the open score through Web Audio. This is a proofing tool -- play
- * once from the top, hear whether the entered notes are right -- so there is
- * deliberately no cursor, no looping, and no following the page.
+ * Sounding the open score through Web Audio. A run is one node graph hung off
+ * one output node; silencing it is disconnecting that node, which stops
+ * everything upstream at once and lets the whole graph be collected. The
+ * AudioContext itself is created on the first play -- inside the click, which
+ * is the user gesture autoplay policy wants -- and reused after that.
  *
- * A run is one node graph hung off one output node; stopping is disconnecting
- * that node, which silences everything upstream at once and lets the whole
- * graph be collected. The AudioContext itself is created on the first play --
- * inside the click, which is the user gesture autoplay policy wants -- and
- * reused after that.
+ * Pausing is not a suspended context: the graph is torn down like any other
+ * stop, and only the tick that was sounding is kept. Resuming is `playFrom`
+ * with that tick, which is the same path the measure-click head-start uses.
+ * That way there is one way to start sounding, and a pause survives anything
+ * that rebuilds the note list -- a tempo change while paused simply resumes at
+ * the new tempo.
  */
 export function usePlayback(score: Score) {
   const [playing, setPlaying] = useState(false)
@@ -34,10 +37,19 @@ export function usePlayback(score: Score) {
   const run = useRef<AudioNode | null>(null)
   const endTimer = useRef<number | null>(null)
   const positionFrame = useRef<number | null>(null)
+  /** Where the running tick had got to, read by `pause`. */
+  const tickNow = useRef<() => number>(() => 0)
+  /** Where a resume would start. Non-null only while paused. */
+  const [pausedAt, setPausedAt] = useState<number | null>(null)
 
   const notes = useMemo(() => schedule(score), [score])
 
-  const stop = useCallback(() => {
+  /**
+   * Silences the graph and clears the timers. Both stopping and pausing go
+   * through this; what tells them apart is only what happens to `pausedAt`,
+   * which is the caller's to set.
+   */
+  const silence = useCallback(() => {
     if (endTimer.current !== null) {
       window.clearTimeout(endTimer.current)
       endTimer.current = null
@@ -52,6 +64,12 @@ export function usePlayback(score: Score) {
     setPosition(null)
   }, [])
 
+  /** Stop: nothing is sounding and nothing is held, so the next play is from the top. */
+  const stop = useCallback(() => {
+    silence()
+    setPausedAt(null)
+  }, [silence])
+
   /**
    * Plays from a tick -- 0 is the top, and a measure's start comes from
    * `ticksAt`. Notes before the tick are skipped, everything after shifts
@@ -59,7 +77,8 @@ export function usePlayback(score: Score) {
    */
   const playFrom = useCallback((fromTick: number) => {
     if (notes.length === 0 || typeof AudioContext === 'undefined') return
-    stop()
+    silence()
+    setPausedAt(null)
     const ctx = (context.current ??= new AudioContext())
     // The context starts suspended until a user gesture -- play is one.
     void ctx.resume()
@@ -112,13 +131,20 @@ export function usePlayback(score: Score) {
       (lastEnd - ctx.currentTime + 0.1) * 1000,
     )
 
+    // Where the run has got to, in ticks. The lead-in is still ahead of the
+    // first note when this is called early, so it never reads before the start.
+    // The follow loop names the column from this, and `pause` keeps the number
+    // itself -- which is why it is a ref and not something recomputed there:
+    // only this closure knows the run's own `first` and tempo.
+    const currentTick = () => Math.max(fromTick, fromTick + (ctx.currentTime - first) / perTick)
+    tickNow.current = currentTick
+
     // Follow along on the grid: convert elapsed time back to ticks and let
     // the pure helper name the column. State changes only when the column
     // does, so the animation loop does not re-render sixty times a second.
     let shown: { measure: number; index: number } | null = null
     const follow = () => {
-      const tick = fromTick + (ctx.currentTime - first) / perTick
-      const column = tick < fromTick ? columnAt(score, fromTick) : columnAt(score, tick)
+      const column = columnAt(score, currentTick())
       if (column?.measure !== shown?.measure || column?.index !== shown?.index) {
         shown = column
         setPosition(column)
@@ -126,9 +152,23 @@ export function usePlayback(score: Score) {
       positionFrame.current = requestAnimationFrame(follow)
     }
     follow()
-  }, [notes, score, stop])
+  }, [notes, score, silence, stop])
 
-  const play = useCallback(() => playFrom(0), [playFrom])
+  /** Play -- or carry on from where a pause left off. */
+  const play = useCallback(() => playFrom(pausedAt ?? 0), [pausedAt, playFrom])
+
+  /**
+   * Pause: keep the tick that was sounding, silence everything else. The
+   * highlight stays on that column rather than going out with the sound, so
+   * the grid keeps showing where a resume will pick up.
+   */
+  const pause = useCallback(() => {
+    if (!playing) return
+    const at = tickNow.current()
+    silence()
+    setPausedAt(at)
+    setPosition(columnAt(score, at))
+  }, [playing, score, silence])
 
   // Unmount: silence whatever is sounding and give the audio device back.
   useEffect(
@@ -143,10 +183,13 @@ export function usePlayback(score: Score) {
 
   return {
     playing,
+    /** Held mid-score: the play button offers to carry on, stop clears it. */
+    paused: pausedAt !== null,
     position,
     canPlay: notes.length > 0,
     play,
     playFrom,
+    pause,
     stop,
   }
 }

@@ -229,6 +229,16 @@ export function useEditor() {
     [score],
   )
 
+  /**
+   * Back to the top of the score. Stopping playback does this, so the next run
+   * starts where the last one did. Like the other two, it is a move and not an
+   * edit: no history entry, and it ends any run of digits.
+   */
+  const resetCursor = useCallback(() => {
+    lastKey.current = null
+    setCursor({ measure: 0, index: 0 })
+  }, [])
+
   const setTime = useCallback(
     (time: TimeSignature) => {
       commit(edit.withTime(score, time), cursor)
@@ -360,6 +370,7 @@ export function useEditor() {
     removeAtCursor,
     moveCursor,
     moveMeasure,
+    resetCursor,
     setTime,
     setKeyFifths,
     setTempo,

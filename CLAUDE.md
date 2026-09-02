@@ -199,8 +199,8 @@ the fret arithmetic and MIDI input are about. The file declares `<transpose>` wi
 lets both be true at once. Written at pitch, the open E string needs three ledger lines: measured on
 the two-page sample, 201 ledger-line elements against 10.
 
-`src/editor/playback.ts` + `usePlayback.ts` are the proofing playback (再生/停止 in the editor
-panel). The note list is built from the `Score` model directly — never from the MusicXML or the
+`src/editor/playback.ts` + `usePlayback.ts` are the playback (再生/一時停止 and 停止 in the
+editor panel). The note list is built from the `Score` model directly — never from the MusicXML or the
 rendered page — so `WRITTEN_OCTAVE_SHIFT` does not apply and notes sound at real pitch, which is
 the point of the shift living only in `musicxml.ts`. `schedule()` is a pure function and is
 tested without an AudioContext in `tests/playback.spec.ts`; the hook is the only code touching Web
@@ -211,6 +211,14 @@ step). The current `STORAGE_VERSION` lives in `storage.ts` and only there — th
 number has already gone stale twice, so it deliberately doesn't. Playback stops when the open
 score changes, per the rule below about remembered positions, and when leaving the editor (in
 video mode it would bleed into the capture).
+
+Pause is not a suspended AudioContext: the graph is torn down exactly as a stop tears it down,
+and all that is kept is the tick that was sounding (#95). Resuming is `playFrom(thatTick)` — the
+same entry point the measure-click head-start uses — so there is one way to start a run, and a
+pause survives anything that rebuilds the note list (a tempo change while paused resumes at the
+new tempo). Stop is the one that clears the held tick *and* sends the editor cursor back to the
+top via `resetCursor()`; like the other cursor moves it does not go through `commit()`, so undo
+has nothing to say about it.
 
 `src/editor/midiFile.ts` writes the score as a standard MIDI file. It takes the note list from
 `schedule()` rather than building its own, so sounding pitch, chords, triplets and the score's
