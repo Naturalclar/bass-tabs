@@ -9,7 +9,7 @@ import { useOsmd } from './score/useOsmd'
 import { useEditor } from './editor/useEditor.ts'
 import { useEditorKeyboard } from './editor/useEditorKeyboard.ts'
 import { toBackup } from './editor/backup.ts'
-import { importFile, isTabImage } from './editor/importFile.ts'
+import { importFile, isAudioFile, isTabImage } from './editor/importFile.ts'
 import { toMidiFile } from './editor/midiFile.ts'
 import { useMidiInput } from './editor/useMidiInput.ts'
 import { usePlayback } from './editor/usePlayback.ts'
@@ -88,6 +88,7 @@ export default function App() {
       // OCR takes seconds (the engine alone is megabytes, loaded lazily), so
       // the wait has to say it is one.
       if (isTabImage(file.name)) setImportNotice('画像を読み取っています…')
+      else if (isAudioFile(file.name)) setImportNotice('音声を読み取っています…')
       const outcome = await importFile(file)
       if (outcome.scores.length > 0) editor.importScores(outcome.scores)
       setImportNotice(outcome.notice)

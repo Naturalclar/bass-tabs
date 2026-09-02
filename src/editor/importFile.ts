@@ -1,4 +1,5 @@
 import { fromBackup } from './backup.ts'
+import { fromAudioFile } from './audioImport.ts'
 import { fromTabImage } from './imageImport.ts'
 import { fromMusicXml } from './musicxmlImport.ts'
 import { MAX_MEASURES } from './model.ts'
@@ -10,6 +11,11 @@ export type ImportOutcome = { scores: Score[]; notice: string }
 /** Files read by pixel analysis + OCR rather than as text. */
 export function isTabImage(name: string): boolean {
   return /\.(png|jpe?g|webp)$/i.test(name)
+}
+
+/** Files transcribed from sound (#76). The decoder is the real arbiter. */
+export function isAudioFile(name: string): boolean {
+  return /\.(wav|mp3|m4a|ogg|flac)$/i.test(name)
 }
 
 /**
@@ -69,6 +75,29 @@ async function read(file: File): Promise<ImportOutcome> {
           ? `1 曲を取り込みました（${result.unread} 箇所読めず、休符にしてあります）`
           : '1 曲を取り込みました（全部 8 分音符なので、音価はエディタで直してください）',
     }
+  }
+
+  if (isAudioFile(file.name)) {
+    const result = await fromAudioFile(file, file.name.replace(/\.[^.]+$/, ''))
+    if (!result.ok) {
+      return {
+        scores: [],
+        notice:
+          result.reason === 'no-notes'
+            ? '音の出だしが見つかりませんでした（ベース単体の録音を入れてください）'
+            : result.reason === 'too-long'
+              ? `小節が多すぎて取り込めません（上限 ${MAX_MEASURES} 小節）`
+              : '音声を読めませんでした',
+      }
+    }
+    const parts = ['1 曲を取り込みました']
+    if (result.unread > 0) parts.push(`${result.unread} 音は音程が読めず、休符にしてあります`)
+    parts.push(
+      result.timed
+        ? '音の長さは音声から推定しました。外れていたらエディタで直してください'
+        : '全部 8 分音符なので、音価はエディタで直してください',
+    )
+    return { scores: [result.score], notice: parts.join('。') }
   }
 
   const text = await file.text()
