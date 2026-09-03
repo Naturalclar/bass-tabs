@@ -270,6 +270,25 @@ test.describe('再生のスケジュール', () => {
  * ページは印刷プレビューのまま。
  */
 test.describe('追従と頭出し', () => {
+  test('一時停止した直後に数字キーがそのまま打てる', async ({ page }) => {
+    await openEditor(page)
+    // クリックではなくキーボードで置く: クリックは「続く数字がその音を
+    // 直す」状態を残すので、直後の 5 が追記か修正かが時間 (800ms 窓) で
+    // 変わってしまう。3 の連打なら 35 は存在しないフレットで、窓の内外
+    // どちらでも 5 は次の音になる。
+    await page.locator('.tab-editor').focus()
+    for (let i = 0; i < 4; i++) await page.keyboard.press('3')
+    await page.getByLabel('BPM').fill('30')
+    await page.getByRole('button', { name: '再生', exact: true }).click()
+    await page.getByRole('button', { name: '一時停止' }).click()
+
+    // フォーカスは一時停止ボタンに残っている。トランスポートは
+    // .tab-editor の外なので、window 側の受け口が無いとこの数字は
+    // どこにも届かず、音が入らないのに何も言われなかった (実際の退行)。
+    await page.keyboard.press('5')
+    await expect(page.locator('.tab-cell--note')).toHaveText(['3', '3', '3', '3', '5'])
+  })
+
   test('小節番号のクリックでその小節から鳴り、いまの列が光る', async ({ page }) => {
     await openEditor(page)
     await page.locator('.tab-editor').focus()

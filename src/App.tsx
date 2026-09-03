@@ -81,6 +81,33 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [keyboard, mode])
 
+  useEffect(() => {
+    // The editor's key scheme is window-level too, not just on `.tab-editor`.
+    // The transport buttons (再生 / 一時停止 / 停止) sit outside the grid and
+    // keep focus after a click, so pausing and then typing a fret used to go
+    // nowhere -- no note, no error. Same guards as the undo handler above:
+    // text fields (and selects, which use keys natively) own their keys, and
+    // anything inside `.tab-editor` is already handled by the grid's own
+    // onKeyDown -- taking it here as well would write every note twice.
+    if (mode !== 'edit') return
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.metaKey || event.ctrlKey) return
+      const target = event.target as HTMLElement | null
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target?.isContentEditable ||
+        target?.closest('.tab-editor')
+      ) {
+        return
+      }
+      keyboard.handleKeyDown(event)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [keyboard, mode])
+
   const [importNotice, setImportNotice] = useState<string | null>(null)
 
   const handleImportFile = useCallback(
