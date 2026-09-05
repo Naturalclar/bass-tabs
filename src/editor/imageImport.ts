@@ -170,7 +170,15 @@ function ocrWorker() {
 }
 
 /** Pixel analysis plus OCR: an image becomes eighth-note entries. */
-export async function readTabEntries(image: ImageData): Promise<TabEntriesResult> {
+/**
+ * `columns` narrows the read to those beats (by index into the analysis,
+ * left to right): the video scan of a scrolling tab already has most of a
+ * frame appended and only needs the beats that just came into view.
+ */
+export async function readTabEntries(
+  image: ImageData,
+  columns?: number[],
+): Promise<TabEntriesResult> {
   const analysis = analyzeTabImage(image)
   if (!analysis.ok) return { ok: false, reason: analysis.reason }
 
@@ -186,7 +194,8 @@ export async function readTabEntries(image: ImageData): Promise<TabEntriesResult
     return digits === '' ? NaN : Number(digits)
   }
   const isFret = (value: number) => Number.isInteger(value) && value >= 0 && value <= MAX_FRET
-  for (const column of analysis.columns) {
+  const wanted = columns ? columns.map((index) => analysis.columns[index]) : analysis.columns
+  for (const column of wanted) {
     // Each string of the beat is its own OCR read; several readable parts
     // make the beat a chord. A part the OCR cannot read is counted, and if
     // nothing in the column was readable the beat becomes a rest -- a gap
