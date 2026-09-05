@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { readTabEntries } from '../editor/imageImport.ts'
 import { analyzeTabImage } from '../editor/tabImage.ts'
-import { signatureOf, sameScreen, type ScreenSignature } from '../editor/videoScan.ts'
+import {
+  beatsOf,
+  isWhole,
+  sameScreen,
+  scrolledBeats,
+  signatureOf,
+  type ScreenBeat,
+  type ScreenSignature,
+} from '../editor/videoScan.ts'
 import { estimateGrid, onsetTimes } from '../editor/audio.ts'
 import { decodeMonoSamples } from '../editor/audioImport.ts'
 import { noteDurations } from '../editor/quantize.ts'
@@ -266,13 +274,21 @@ export function VideoImport({ onAppend, time }: Props) {
     abortScan.current = false
     const STEP = 0.5
     let lastAppended: ScreenSignature | null = null
+    // The beats of the last appended screen, for a tab that scrolls instead
+    // of switching: each frame is matched against these by shift, and only
+    // what came into view since is read. Kept in the coordinates of the
+    // frame it was last seen in.
+    let frontier: ScreenBeat[] | null = null
     let pending: ScreenSignature | null = null
+    let pendingBeats: ScreenBeat[] = []
+    let pendingFrame: ImageData | null = null
     let pendingSeenAt = 0
     let held: { entries: Entry[]; unread: number; seenAt: number } | null = null
     let screens = 0
     let notes = 0
     let unread = 0
     let timed = 0
+    let scrolled = 0
     try {
       video.pause()
       const duration = await resolvedDuration(video)
@@ -321,6 +337,40 @@ export function VideoImport({ onAppend, time }: Props) {
           pending = null
           continue
         }
+        // A scrolling tab: the appended beats are still there, shifted left,
+        // with new ones at the right edge. Those are read and appended on
+        // their own -- no waiting to see the frame twice, since the shift
+        // match already says this is the same line and not a cut -- and
+        // the frontier moves with the frame. Their rhythm is not estimated:
+        // a beat read on its own has no display window to count onsets in.
+        const beats = beatsOf(analysis)
+        // A scrolling tab: the appended beats are still there, shifted left,
+        // with new ones at the right edge. Those are read and appended on
+        // their own -- no waiting to see the frame twice, since the shift
+        // match already says this is the same line and not a cut -- and
+        // the frontier moves with the frame. Their rhythm is not estimated:
+        // a beat read on its own has no display window to count onsets in.
+        const takeScrolled = async (scroll: NonNullable<ReturnType<typeof scrolledBeats>>) => {
+          if (scroll.fresh.length > 0) {
+            const result = await readTabEntries(frame, scroll.fresh)
+            if (result.ok && result.entries.length > 0) {
+              flush(at)
+              const { added } = onAppendRef.current(result.entries)
+              notes += added
+              unread += result.unread
+              scrolled += result.entries.length
+            }
+          }
+          const appended = new Set(scroll.fresh)
+          frontier = beats.filter((_, index) => scroll.matched[index] || appended.has(index))
+          lastAppended = null
+          pending = null
+        }
+        const scroll = frontier ? scrolledBeats(frontier, beats) : null
+        if (scroll) {
+          await takeScrolled(scroll)
+          continue
+        }
         if (pending && sameScreen(signature, pending)) {
           const result = await readTabEntries(frame)
           if (result.ok && result.entries.length > 0) {
@@ -328,17 +378,49 @@ export function VideoImport({ onAppend, time }: Props) {
             held = { entries: result.entries, unread: result.unread, seenAt: pendingSeenAt }
           }
           lastAppended = signature
+          frontier = beats
           pending = null
-        } else {
-          pending = signature
-          pendingSeenAt = at
+          continue
         }
+        const moved = pending && pendingFrame ? scrolledBeats(pendingBeats, beats) : null
+        if (moved && moved.shift > 0 && pendingFrame) {
+          // Not the same screen twice, but the same line moved on: a
+          // scrolling tab, seen for the first time. The frame it was first
+          // seen in is the start of the line -- read from *that* frame,
+          // since its leftmost beat may already have left this one -- and
+          // from here the frontier takes over.
+          const whole = pendingBeats
+            .map((_, index) => index)
+            .filter((index) => isWhole(pendingBeats[index]))
+          const result = whole.length > 0 ? await readTabEntries(pendingFrame, whole) : null
+          if (result?.ok && result.entries.length > 0) {
+            flush(pendingSeenAt)
+            const { added } = onAppendRef.current(result.entries)
+            screens++
+            notes += added
+            unread += result.unread
+          }
+          frontier = whole.map((index) => pendingBeats[index])
+          const rest = scrolledBeats(frontier, beats)
+          if (rest) await takeScrolled(rest)
+          lastAppended = null
+          pending = null
+          continue
+        }
+        pending = signature
+        pendingBeats = beats
+        pendingFrame = frame
+        pendingSeenAt = at
       }
       flush(duration)
 
       const parts =
         screens > 0
-          ? [`${screens} 画面から ${notes} 音を取り込みました`]
+          ? [
+              scrolled > 0
+                ? `${screens} 画面と、流れてきた ${scrolled} 拍から ${notes} 音を取り込みました`
+                : `${screens} 画面から ${notes} 音を取り込みました`,
+            ]
           : ['タブ譜の画面が見つかりませんでした']
       if (unread > 0) parts.push(`${unread} 箇所は読めず休符`)
       if (abortScan.current) parts.push('途中で停止しました')
