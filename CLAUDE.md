@@ -33,7 +33,7 @@ passing is not the same as CI passing — the build and the print checks are not
 
 The only tests are the Playwright specs in `tests/` — `print.spec.ts` for imported files, and
 one spec per editor area for scores written in the app (`editor-input`, `library`,
-`import-export`, `midi`, `image-import`, `video-import`, `audio`, `playback`, `appearance`, sharing
+`import-export`, `midi`, `ascii-tab`, `image-import`, `video-import`, `audio`, `playback`, `appearance`, sharing
 `tests/helpers.ts`), plus `bundle.spec.ts` for what the first load is allowed to carry; there are no unit tests. `pnpm test:print` runs them all — it builds and
 serves the app itself, so it needs no running dev server.
 
@@ -244,6 +244,20 @@ score five-string. Fingering is re-derived per beat
 twice — the invariant `isScore` enforces — because `positionFor` alone puts D2+E2 on one string.
 Out-of-range pitches are dropped and counted, as the image import does. `importFile.ts` reads
 `.mid`/`.midi` through `arrayBuffer()` before the text path; it is the one binary import.
+
+`src/editor/asciiTab.ts` reads a plain-text ASCII tab (`fromAsciiTab(text, title)`, pure, tested
+in `tests/ascii-tab.spec.ts`). It reaches the library two ways that share one path: a `.txt`/`.tab`
+through `importFile.ts`, or a paste anywhere in the editor that is not a text field, which `App.tsx`
+wraps in a `File` and hands to the same importer -- `isAsciiTab()` is the gate so pasted prose does
+nothing. The format has strings, frets and barlines and no note values, so the policy is the one
+the image/video/audio imports settled: **do not infer rhythm**. Bars come from `|`, every note in a
+bar gets one uniform value (eighths, 16ths past eight notes, refused past sixteen), and the bar is
+padded with rests so bar N of the text is bar N of the score. Digits sharing a column (by span
+overlap, so a right-aligned `9` under `10` joins) are a chord; a run of digits is one number;
+line order is `<string>` order (top line is string 1); five lines make a five-string score, and
+labels that spell any other tuning are refused. Technique marks (any character that is not a
+digit, dash, bar or space) refuse the whole tab rather than vanish -- a score missing its
+hammer-ons looks complete and is not.
 
 MusicXML's two numbering schemes run in opposite directions and are the easiest thing to break:
 `<string>` counts from the highest-pitched string (G is 1), `<staff-tuning line>` counts from the

@@ -1,4 +1,5 @@
 import { fromBackup } from './backup.ts'
+import { fromAsciiTab } from './asciiTab.ts'
 import { fromAudioFile } from './audioImport.ts'
 import { fromTabImage } from './imageImport.ts'
 import { fromMidi } from './midiImport.ts'
@@ -19,6 +20,11 @@ export function isAudioFile(name: string): boolean {
   return /\.(wav|mp3|m4a|ogg|flac)$/i.test(name)
 }
 
+/** Plain text: an ASCII tab, pasted or saved. */
+export function isTextTab(name: string): boolean {
+  return /\.(txt|tab)$/i.test(name)
+}
+
 /** Standard MIDI files: binary, so they never go through `file.text()`. */
 export function isMidiFile(name: string): boolean {
   return /\.midi?$/i.test(name)
@@ -26,7 +32,7 @@ export function isMidiFile(name: string): boolean {
 
 /**
  * Takes a whole library (.json), a single MusicXML score, a MIDI file, an
- * audio recording, or a screenshot of a tab. All are read the same way --
+ * ASCII tab, an audio recording, or a screenshot of a tab. All are read the same way --
  * validate, then add -- so an unreadable
  * file changes nothing and says why instead of failing quietly. This function
  * never throws: whatever goes wrong becomes the notice, because a rejected
@@ -139,6 +145,33 @@ async function read(file: File): Promise<ImportOutcome> {
   }
 
   const text = await file.text()
+  if (isTextTab(file.name)) {
+    const result = fromAsciiTab(text, file.name.replace(/\.[^.]+$/, ''))
+    if (!result.ok) {
+      return {
+        scores: [],
+        notice:
+          result.reason === 'no-tab'
+            ? 'タブ譜の行（G|---- のような行）が見つかりませんでした'
+            : result.reason === 'unsupported'
+              ? '奏法記号（h p / \\ ~ x など）や 4 弦・5 弦以外のチューニングが入っているので取り込めません'
+              : result.reason === 'misaligned'
+                ? '弦ごとに小節線 | の数が違う行があるので取り込めません'
+                : result.reason === 'too-dense'
+                  ? '1 小節に 17 音以上ある小節があるので取り込めません（小節線 | で区切ってください）'
+                  : result.reason === 'too-long'
+                    ? `小節が多すぎて取り込めません（上限 ${MAX_MEASURES} 小節）`
+                    : '音符がありません',
+      }
+    }
+    return {
+      scores: [result.score],
+      notice: result.dense
+        ? '1 曲を取り込みました（音価は推定していません。8 分音符、9 音以上の小節は 16 分音符で置いてあるので、エディタで直してください）'
+        : '1 曲を取り込みました（音価は推定していません。全部 8 分音符で置いてあるので、エディタで直してください）',
+    }
+  }
+
   if (file.name.endsWith('.json')) {
     const result = fromBackup(text)
     if (!result.ok) {

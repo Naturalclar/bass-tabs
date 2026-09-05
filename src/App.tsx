@@ -9,6 +9,7 @@ import { useOsmd } from './score/useOsmd'
 import { useEditor } from './editor/useEditor.ts'
 import { useEditorKeyboard } from './editor/useEditorKeyboard.ts'
 import { toBackup } from './editor/backup.ts'
+import { isAsciiTab } from './editor/asciiTab.ts'
 import { importFile, isAudioFile, isTabImage } from './editor/importFile.ts'
 import { toMidiFile } from './editor/midiFile.ts'
 import { useMidiInput } from './editor/useMidiInput.ts'
@@ -122,6 +123,30 @@ export default function App() {
     },
     [editor],
   )
+
+  useEffect(() => {
+    // Pasting an ASCII tab anywhere in the editor imports it as a new score,
+    // through the same path as a .txt file so the two cannot drift. Text
+    // fields keep their paste; prose pasted elsewhere is left alone, and only
+    // something with tab lines in it gets read -- or refused with a reason.
+    if (mode !== 'edit') return
+    function onPaste(event: ClipboardEvent) {
+      const target = event.target as HTMLElement | null
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable
+      ) {
+        return
+      }
+      const text = event.clipboardData?.getData('text/plain') ?? ''
+      if (!isAsciiTab(text)) return
+      event.preventDefault()
+      void handleImportFile(new File([text], '貼り付けたタブ.txt', { type: 'text/plain' }))
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [handleImportFile, mode])
 
   // Takes bytes as well as text: a MIDI file is binary, and a string-only
   // helper would have written its digits out as characters. The type argument
