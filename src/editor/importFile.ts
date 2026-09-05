@@ -1,6 +1,7 @@
 import { fromBackup } from './backup.ts'
 import { fromAudioFile } from './audioImport.ts'
 import { fromTabImage } from './imageImport.ts'
+import { fromMidi } from './midiImport.ts'
 import { fromMusicXml } from './musicxmlImport.ts'
 import { MAX_MEASURES } from './model.ts'
 import type { Score } from './model.ts'
@@ -18,9 +19,15 @@ export function isAudioFile(name: string): boolean {
   return /\.(wav|mp3|m4a|ogg|flac)$/i.test(name)
 }
 
+/** Standard MIDI files: binary, so they never go through `file.text()`. */
+export function isMidiFile(name: string): boolean {
+  return /\.midi?$/i.test(name)
+}
+
 /**
- * Takes a whole library (.json), a single MusicXML score, or a screenshot of
- * a tab. All are read the same way -- validate, then add -- so an unreadable
+ * Takes a whole library (.json), a single MusicXML score, a MIDI file, an
+ * audio recording, or a screenshot of a tab. All are read the same way --
+ * validate, then add -- so an unreadable
  * file changes nothing and says why instead of failing quietly. This function
  * never throws: whatever goes wrong becomes the notice, because a rejected
  * promise would leave the person with no file imported and nothing said
@@ -98,6 +105,37 @@ async function read(file: File): Promise<ImportOutcome> {
         : '全部 8 分音符なので、音価はエディタで直してください',
     )
     return { scores: [result.score], notice: parts.join('。') }
+  }
+
+  if (isMidiFile(file.name)) {
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const result = fromMidi(bytes, file.name.replace(/\.[^.]+$/, ''))
+    if (!result.ok) {
+      return {
+        scores: [],
+        notice:
+          result.reason === 'smpte'
+            ? 'タイムコード基準 (SMPTE) の MIDI は取り込めません'
+            : result.reason === 'multi-track'
+              ? '音の入ったトラックが複数あるので取り込めません（ベースのトラックだけにしてください）'
+              : result.reason === 'off-grid'
+                ? '格子に乗らない音があるので取り込めません（音の頭と長さを 16 分・3 連の位置に揃えてください）'
+                : result.reason === 'unsupported'
+                  ? '表せないリズムがあるので取り込めません（小節線をまたぐ音・重なった音・32 分以下）'
+                  : result.reason === 'too-long'
+                    ? `小節が多すぎて取り込めません（上限 ${MAX_MEASURES} 小節）`
+                    : result.reason === 'no-notes'
+                      ? '音符がありません'
+                      : 'MIDI ファイルを読めませんでした',
+      }
+    }
+    return {
+      scores: [result.score],
+      notice:
+        result.dropped > 0
+          ? `1 曲を取り込みました（音域外の ${result.dropped} 音は落としてあります）`
+          : '1 曲を取り込みました（運指は付け直してあります）',
+    }
   }
 
   const text = await file.text()

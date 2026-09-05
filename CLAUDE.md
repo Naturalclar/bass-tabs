@@ -227,8 +227,23 @@ SMF's header division *is* ticks per quarter note, so every tick lands in the fi
 Two things it must keep doing — a note-off is written before a note-on at the same tick (a note
 ending exactly where the next begins is the common case, and the wrong order silences the new
 one), and two strings sounding one pitch collapse to a single note (the model allows E 5th fret
-with A open; one MIDI channel does not). Strings and frets do not survive: this is a one-way
-door, which is why importing `.mid` is a separate problem and not the inverse of this file.
+with A open; one MIDI channel does not). Strings and frets do not survive, so the file cannot be
+read back as written: importing re-fingers it.
+
+`src/editor/midiImport.ts` reads a `.mid` into a `Score` (`fromMidi(bytes, title)`, pure, so the
+round trip through `toMidiFile()` is checked in Node in `tests/midi.spec.ts`). The file holds a
+performance and the model holds notation, and the reader refuses to guess: every onset and end
+must land on the 24-tick grid once the file's division is scaled (no quantisation — that is #75),
+every length must be a value the model has, a note may not cross a barline or overlap the next
+beat, a chord's tones must end together, and exactly one track may carry notes. Anything else is
+a distinct refusal reason mapped to its notice in `importFile.ts`. Gaps become rests via a
+smallest-count fill (`restsFor`), plain before triplet, and a triplet rest takes the value of the
+triplet note it borders so `musicxml.ts` groups them. A note below the four-string's E makes the
+score five-string. Fingering is re-derived per beat
+(`fingeringsFor`): highest pitch first, highest reaching string, backtracking so no string sounds
+twice — the invariant `isScore` enforces — because `positionFor` alone puts D2+E2 on one string.
+Out-of-range pitches are dropped and counted, as the image import does. `importFile.ts` reads
+`.mid`/`.midi` through `arrayBuffer()` before the text path; it is the one binary import.
 
 MusicXML's two numbering schemes run in opposite directions and are the easiest thing to break:
 `<string>` counts from the highest-pitched string (G is 1), `<staff-tuning line>` counts from the
