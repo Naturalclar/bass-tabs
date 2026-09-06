@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BASE_PATH } from '../base-path.ts'
+import { scrolledBeats, type ScreenBeat } from '../src/editor/videoScan.ts'
 
 /**
  * Video mode. getDisplayMedia never works headless (measured back in #11), so
@@ -78,9 +79,13 @@ test.describe('動画からの取り込み', () => {
  * screen B at 2.2 / 2.8 (♩ ♩). Without it the file has no audio track at
  * all, which is what keeps the all-eighths fallback honest.
  */
-async function makeVideoFile(page: Page, path: string, withAudio = false) {
+async function makeVideoFile(
+  page: Page,
+  path: string,
+  options: { audio?: boolean; scroll?: boolean } = {},
+) {
   await page.setContent('<body></body>')
-  const b64: string = await page.evaluate(async (audio: boolean) => {
+  const b64: string = await page.evaluate(async ({ audio = false, scroll = false }) => {
     const canvas = document.createElement('canvas')
     canvas.width = 720
     canvas.height = 220
@@ -112,6 +117,11 @@ async function makeVideoFile(page: Page, path: string, withAudio = false) {
       { lane: 0, x: 120, text: '12' },
       { lane: 3, x: 300, text: '7' },
     ]
+    // One long line, 12 beats 100px apart, that scrolls left at 200px/s
+    // under a fixed playhead. About seven beats are in view at a time.
+    const line = ['3', '5', '0', '12', '7', '10', '3', '5', '0', '12', '7', '10'].map(
+      (text, i) => ({ lane: [3, 2, 1, 0, 3, 1, 2, 0, 3, 0, 1, 2][i], x: 80 + i * 100, text }),
+    )
     const stream = canvas.captureStream(10)
     let audioContext: AudioContext | null = null
     if (audio) {
@@ -144,9 +154,14 @@ async function makeVideoFile(page: Page, path: string, withAudio = false) {
     await new Promise<void>((resolve) => {
       const tick = () => {
         const t = performance.now() - start
-        if (t < 1600) draw(screenA, 40 + (t / 1600) * 600)
+        if (scroll) {
+          draw(
+            line.map((n) => ({ ...n, x: n.x - (t / 1000) * 200 })).filter((n) => n.x > -40),
+            360,
+          )
+        } else if (t < 1600) draw(screenA, 40 + (t / 1600) * 600)
         else draw(screenB, 40 + ((t - 1600) / 1600) * 600)
-        if (t < 3200) requestAnimationFrame(tick)
+        if (t < (scroll ? 4000 : 3200)) requestAnimationFrame(tick)
         else resolve()
       }
       tick()
@@ -160,7 +175,7 @@ async function makeVideoFile(page: Page, path: string, withAudio = false) {
     const bytes = new Uint8Array(buffer)
     for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
     return btoa(binary)
-  }, withAudio)
+  }, options)
   writeFileSync(path, Buffer.from(b64, 'base64'))
 }
 
@@ -220,10 +235,46 @@ async function makeVideoFile(page: Page, path: string, withAudio = false) {
    * stand in for its notes, and the counts agree here -- so both screens
    * get their rhythm instead of the all-eighths default.
    */
+  /**
+   * The other kind of video: one long line that scrolls under a fixed
+   * playhead. No two sampled frames are the same screen, so the page-by-page
+   * dedup never fires; the scan has to recognise the line moving and read
+   * only what came into view. Twelve beats, about seven in view at once,
+   * each expected exactly once and in order.
+   */
+  test('横に流れるタブ譜は、流れてきた拍だけを一度ずつ読む', async ({ page }) => {
+    test.setTimeout(180_000)
+    const file = join(mkdtempSync(join(tmpdir(), 'bass-tabs-vid-')), 'scroll.webm')
+    await makeVideoFile(page, file, { scroll: true })
+
+    await page.goto(BASE_PATH)
+    await page.locator('.tab-editor').waitFor()
+    await page.getByRole('button', { name: '動画から取り込む' }).click()
+    await page.locator('.video-import input[type="file"]').setInputFiles(file)
+    await page.locator('video.video-import__player').waitFor()
+
+    await page.getByRole('button', { name: '動画を走査して全部読み取る' }).click()
+    await page.waitForFunction(
+      () => {
+        const text = document.querySelector('.video-import__notice')?.textContent ?? ''
+        return text.includes('取り込みました') || text.includes('見つかりませんでした')
+      },
+      undefined,
+      { timeout: 150_000 },
+    )
+    await expect(page.locator('.video-import__notice')).toContainText('流れてきた')
+    await expect(page.locator('.video-import__notice')).toContainText('12 音')
+
+    await page.getByRole('button', { name: '譜面を作る' }).click()
+    expect(await gridNotes(page)).toEqual([
+      'E3', 'A5', 'D0', 'G12', 'E7', 'D10', 'A3', 'G5', 'E0', 'G12', 'D7', 'A10',
+    ])
+  })
+
   test('走査は音の長さを音声から推定する', async ({ page }) => {
     test.setTimeout(180_000)
     const file = join(mkdtempSync(join(tmpdir(), 'bass-tabs-vid-')), 'tab.webm')
-    await makeVideoFile(page, file, true)
+    await makeVideoFile(page, file, { audio: true })
 
     await page.goto(BASE_PATH)
     await page.locator('.tab-editor').waitFor()
@@ -339,5 +390,54 @@ async function makeVideoFile(page: Page, path: string, withAudio = false) {
     await expect(page.locator('.video-import__notice')).toContainText(
       '画面共有を開始できませんでした',
     )
+  })
+})
+
+/**
+ * The shift matcher behind the scrolling scan, checked directly: it is pure,
+ * and the video test above can only say "12 notes came out", not why.
+ */
+test.describe('流れるタブ譜の拍の突き合わせ', () => {
+  const beat = (strings: string, bucket: number): ScreenBeat => ({ strings, bucket })
+  const line = [beat('4', 5), beat('3', 11), beat('2', 17), beat('1', 23), beat('4', 29), beat('2', 35)]
+  const shifted = (by: number, extra: ScreenBeat[] = []) =>
+    [...line.map((b) => beat(b.strings, b.bucket - by)).filter((b) => b.bucket >= 0), ...extra]
+
+  test('同じ列が左へずれていれば、最後に一致した拍より右の拍だけが新しい', () => {
+    const current = shifted(6, [beat('3', 35), beat('1', 41)])
+    const result = scrolledBeats(line, current)
+    expect(result?.shift).toBe(6)
+    // 3 弦@35 は新顔。1 弦@41 は右端にかかっているのでまだ読まない
+    expect(result?.fresh).toEqual([current.length - 2])
+  })
+
+  test('1 目盛のぶれは同じ拍として数える', () => {
+    const jittered = line.map((b, i) => beat(b.strings, b.bucket - 6 + (i % 2)))
+    const result = scrolledBeats(line, jittered)
+    expect(result?.matched).toEqual(line.map(() => true))
+    // 半分が -6、半分が -5 なので、どちらも同じだけ正確
+    expect([5, 6]).toContain(result?.shift)
+  })
+
+  test('ずらしても揃わなければ別の画面（切り替わり）', () => {
+    const other = [beat('1', 4), beat('1', 12), beat('3', 20), beat('2', 28), beat('4', 36)]
+    expect(scrolledBeats(line, other)).toBeNull()
+    // 3 拍未満の一致は偶然と見なす
+    expect(scrolledBeats(line.slice(0, 2), shifted(6).slice(0, 2))).toBeNull()
+  })
+
+  test('ずれ 0 で拍が増えるだけの画面（弾いた音が現れていく形式）も新しい拍を返す', () => {
+    const result = scrolledBeats(line.slice(0, 4), [...line.slice(0, 4), beat('3', 30)])
+    expect(result?.shift).toBe(0)
+    expect(result?.fresh).toEqual([4])
+  })
+
+  test('前の画面が再生ヘッドで 1 拍隠れていても、その右の拍は新しいと分かる', () => {
+    // 前フレームで 2 弦@17 が隠れていた（frontier に無い）。今のフレームでは見えている
+    const previous = line.filter((b) => b.bucket !== 17)
+    const current = shifted(6, [beat('3', 35)])
+    const result = scrolledBeats(previous, current)
+    // 隠れていた拍は「最後に一致した拍」より左なので新顔扱いにはならない
+    expect(result?.fresh).toEqual([current.length - 1])
   })
 })

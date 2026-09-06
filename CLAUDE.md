@@ -140,7 +140,16 @@ real screenshot (dark browser UI around a bright video).
 `src/components/VideoImport.tsx` is video mode, with two sources. A video *file* is
 same-origin, so the scan seeks through it at decode speed and reads each new screenful of tab
 once -- `videoScan.ts` holds the pure screen-signature logic (position+strings per beat,
-70%-overlap sameness, so a moving playhead does not read as a new screen). A YouTube embed is
+70%-overlap sameness, so a moving playhead does not read as a new screen). Tabs that *scroll*
+under a fixed playhead never repeat a screen, so the same file also has `scrolledBeats()`: the
+beats appended so far (the `frontier`) are matched against each frame by a common leftward shift
+(±1 bucket, ties broken by exactness), and only the beats past the last match and clear of the
+right edge (`isWhole`) are OCR'd (`readTabEntries` takes a column subset for this). The scan
+tries the frontier first, then the same-screen-twice page path, then the scroll bootstrap -- in
+that order, because a static screen also matches itself at shift 0 and must keep the page path
+(that is where audio timing lives; scrolled beats get none). The bootstrap reads the *first-seen*
+frame, kept as `pendingFrame`, because its leftmost beat may already have left the current one.
+Matching ignores frets, so a repeated riff across a page cut can read as a scroll; README says so. A YouTube embed is
 cross-origin, so it goes through `getDisplayMedia` capture instead. Both feed the same
 recogniser (`readTabEntries`) and append to the open score -- one capture (or one detected
 screen), one commit, one undo step. The scan loop outlives many commits, so it reads
